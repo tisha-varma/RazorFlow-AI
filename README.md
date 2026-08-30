@@ -10,9 +10,9 @@ Every money action is **explainable**, **bounded**, and **gated**. The AI never 
 
 | Phase | Status | Description |
 |-------|--------|-------------|
-| Phase 0 | 🔄 In Progress | Planning docs |
-| Phase 1 | ⬜ Pending | Foundation (backend + frontend scaffolds) |
-| Phase 2 | ⬜ Pending | Catalog & policy setup |
+| Phase 0 | ✅ Completed | Planning docs |
+| Phase 1 | ✅ Completed | Foundation (backend + frontend scaffolds) |
+| Phase 2 | 🔄 In Progress | Catalog & policy setup |
 | Phase 3 | ⬜ Pending | AI agent + recommendations |
 | Phase 4 | ⬜ Pending | Cart + upsell + policy tests |
 | Phase 5 | ⬜ Pending | Approval gate |

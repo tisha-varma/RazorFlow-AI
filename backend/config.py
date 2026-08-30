@@ -1,0 +1,26 @@
+import os
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+class Settings(BaseSettings):
+    LLM_PROVIDER: str = "gemini"
+    LLM_API_KEY: str = ""
+    LLM_MODEL: str = "gemini-2.5-flash"
+    
+    # Razorpay Test Credentials (to be filled later)
+    RAZORPAY_KEY_ID: str = ""
+    RAZORPAY_KEY_SECRET: str = ""
+    RAZORPAY_WEBHOOK_SECRET: str = ""
+    
+    # Database
+    DATABASE_URL: str = "sqlite:///./razorflow.db"
+    
+    # CORS Origins
+    CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:3001", "http://127.0.0.1:3000"]
+    
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore"
+    )
+
+settings = Settings()
