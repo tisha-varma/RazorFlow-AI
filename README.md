@@ -12,17 +12,15 @@ Every money action is **explainable**, **bounded**, and **gated**. The AI never 
 |-------|--------|-------------|
 | Phase 0 | ✅ Completed | Planning docs |
 | Phase 1 | ✅ Completed | Foundation (backend + frontend scaffolds) |
-| Phase 2 | 🔄 In Progress | Catalog & policy setup |
-| Phase 3 | ⬜ Pending | AI agent + recommendations |
-| Phase 4 | ⬜ Pending | Cart + upsell + policy tests |
-| Phase 5 | ⬜ Pending | Approval gate |
-| Phase 6 | ⬜ Pending | Razorpay payment |
-| Phase 7 | ⬜ Pending | Failure handling + audit trail |
-| Phase 8 | ⬜ Pending | Merchant dashboard |
-| Phase 9 | ⬜ Pending | Policy settings + CSV + webhooks |
-| Phase 10 | ⬜ Pending | UI polish |
-| Phase 11 | ⬜ Pending | Analytics + funnel + demo mode |
-| Phase 12 | ⬜ Pending | Tests + final polish |
+| Phase 2 | ✅ Completed | AI agent + cart + policy engine + tests |
+| Phase 3 | ⬜ Pending | Approval gate |
+| Phase 4 | ⬜ Pending | Razorpay payment |
+| Phase 5 | ⬜ Pending | Failure handling + audit trail |
+| Phase 6 | ⬜ Pending | Merchant dashboard |
+| Phase 7 | ⬜ Pending | Policy settings + CSV + webhooks |
+| Phase 8 | ⬜ Pending | UI polish |
+| Phase 9 | ⬜ Pending | Analytics + funnel + demo mode |
+| Phase 10 | ⬜ Pending | Tests + final polish |
 
 ## Architecture
 
@@ -132,3 +130,23 @@ razorflow-ai/
 ## Known Limitations
 
 *None yet — will document any cuts here.*
+
+## Phase 2 Completion Summary
+
+### What Was Implemented
+- **LLM Integration:** Google Gemini client with single-provider interface (`services/ai/llm_client.py`)
+- **Tool Registry:** 12 tools the LLM can call — search, get product, check stock, related products, cart CRUD, calculate totals, check policy, generate summary, request approval (`services/ai/tool_registry.py`)
+- **Agent Orchestrator:** Message loop that processes user messages, executes tool calls, tracks state (`services/ai/agent.py`)
+- **System Prompt:** Safety-constrained prompt that prevents price invention and policy bypass (`services/ai/prompts.py`)
+- **Cart Service:** Full CRUD with price snapshotting, duplicate handling, and total calculation (`services/cart_service.py`)
+- **Cart Router:** REST endpoints for cart operations (`routers/cart.py`)
+- **Agent Router:** `/api/agent/chat` endpoint for AI conversation (`routers/agent.py`)
+- **State Machine:** Session state tracking with valid transitions (`services/state_machine.py`)
+- **40 Tests:** Policy (6), catalog (9), cart (9), agent (16) — all passing
+
+### Safety Guarantees
+- LLM never directly accesses the database
+- LLM never invents product data, prices, or stock
+- All policy decisions are deterministic backend code
+- All prices stored as integers in paise (₹1 = 100 paise)
+- Approval requires explicit user acceptance
