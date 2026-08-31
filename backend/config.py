@@ -1,5 +1,8 @@
 import os
+from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_backend_dir = Path(__file__).parent
 
 class Settings(BaseSettings):
     LLM_PROVIDER: str = "gemini"
@@ -18,7 +21,7 @@ class Settings(BaseSettings):
     CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:3001", "http://127.0.0.1:3000"]
     
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(_backend_dir / ".env"),
         env_file_encoding="utf-8",
         extra="ignore"
     )
