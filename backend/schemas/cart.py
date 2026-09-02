@@ -22,6 +22,7 @@ class CartItemOut(CartItemBase):
     id: int
     cart_id: int
     unit_price_paise: int
+    product_name: str = ""
     created_at: datetime
 
     class Config:

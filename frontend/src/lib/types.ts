@@ -40,6 +40,7 @@ export interface CartItem {
   quantity: number;
   unit_price_paise: number;
   is_upsell: boolean;
+  product_name: string;
   created_at: string;
   product?: Product;
   variant?: ProductVariant;

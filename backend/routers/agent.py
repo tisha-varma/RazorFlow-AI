@@ -2,12 +2,15 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from backend.database import get_db
+from backend.config import settings
 from backend.schemas.agent import (
     AgentChatRequest, AgentChatResponse,
     SessionCreateRequest, SessionCreateResponse,
     SessionStateResponse, ToolCallOut
 )
-from backend.services.ai.llm_client import GeminiLLMClient
+from backend.services.ai.llm_client import (
+    GroqLLMClient, GeminiLLMClient, OllamaLLMClient, RotatingLLMClient
+)
 from backend.services.ai.agent import Agent
 from backend.services.state_machine import state_machine, SessionState
 from backend.services.cart_service import CartService
@@ -20,7 +23,38 @@ _agent = None
 def get_agent() -> Agent:
     global _agent
     if _agent is None:
-        llm_client = GeminiLLMClient()
+        provider = settings.LLM_PROVIDER.lower()
+
+        if provider == "ollama":
+            llm_client = OllamaLLMClient()
+
+        elif provider == "groq":
+            keys = [k.strip() for k in settings.LLM_API_KEYS.split(",") if k.strip()]
+            if keys:
+                clients = [GroqLLMClient(api_key=k) for k in keys]
+                llm_client = RotatingLLMClient(clients)
+            else:
+                llm_client = GroqLLMClient()
+
+        elif provider == "gemini":
+            keys = [k.strip() for k in settings.LLM_API_KEYS.split(",") if k.strip()]
+            if keys:
+                clients = [GeminiLLMClient(api_key=k) for k in keys]
+                llm_client = RotatingLLMClient(clients)
+            else:
+                llm_client = GeminiLLMClient()
+
+        else:  # auto — try Ollama, then cloud providers
+            clients = [OllamaLLMClient()]
+            keys = [k.strip() for k in settings.LLM_API_KEYS.split(",") if k.strip()]
+            if keys:
+                clients.extend([GroqLLMClient(api_key=k) for k in keys])
+                clients.extend([GeminiLLMClient(api_key=k) for k in keys])
+            else:
+                clients.append(GroqLLMClient())
+                clients.append(GeminiLLMClient())
+            llm_client = RotatingLLMClient(clients)
+
         _agent = Agent(llm_client)
     return _agent
 

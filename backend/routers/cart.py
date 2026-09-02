@@ -3,48 +3,82 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.schemas.cart import CartOut, CartCreate, CartItemCreate, CartItemUpdate, CartCalculateResponse
 from backend.services.cart_service import CartService
+from backend.models.cart import Cart, CartItem
+from backend.models.product import Product
 
 router = APIRouter(prefix="/cart", tags=["Cart"])
 
 
-@router.post("", response_model=CartOut, status_code=status.HTTP_201_CREATED)
+def cart_with_names(cart: Cart, db: Session) -> dict:
+    """Add product names to cart items."""
+    # Fetch product names in bulk
+    product_ids = [item.product_id for item in cart.items]
+    products = {p.id: p.name for p in db.query(Product).filter(Product.id.in_(product_ids)).all()} if product_ids else {}
+
+    items = []
+    for item in cart.items:
+        product_name = products.get(item.product_id, f"Product #{item.product_id}")
+        items.append({
+            "id": item.id,
+            "cart_id": item.cart_id,
+            "product_id": item.product_id,
+            "variant_id": item.variant_id,
+            "quantity": item.quantity,
+            "unit_price_paise": item.unit_price_paise,
+            "is_upsell": item.is_upsell,
+            "product_name": product_name,
+            "created_at": item.created_at
+        })
+    return {
+        "id": cart.id,
+        "session_id": cart.session_id,
+        "customer_id": cart.customer_id,
+        "merchant_id": cart.merchant_id,
+        "status": cart.status,
+        "created_at": cart.created_at,
+        "updated_at": cart.updated_at,
+        "items": items
+    }
+
+
+@router.post("", status_code=status.HTTP_201_CREATED)
 def create_cart(req: CartCreate, db: Session = Depends(get_db)):
     cart = CartService.create_cart(db, req.session_id, req.merchant_id)
-    return cart
+    return cart_with_names(cart, db)
 
 
-@router.get("/{cart_id}", response_model=CartOut)
+@router.get("/{cart_id}")
 def get_cart(cart_id: int, db: Session = Depends(get_db)):
     cart = CartService.get_cart(db, cart_id)
     if not cart:
         raise HTTPException(status_code=404, detail="Cart not found")
-    return cart
+    return cart_with_names(cart, db)
 
 
-@router.post("/{cart_id}/items", response_model=CartOut, status_code=status.HTTP_201_CREATED)
+@router.post("/{cart_id}/items", status_code=status.HTTP_201_CREATED)
 def add_item(cart_id: int, item: CartItemCreate, db: Session = Depends(get_db)):
     cart = CartService.add_item(
         db, cart_id, item.product_id, item.variant_id, item.quantity, item.is_upsell
     )
     if not cart:
         raise HTTPException(status_code=404, detail="Cart or product not found")
-    return cart
+    return cart_with_names(cart, db)
 
 
-@router.put("/{cart_id}/items/{item_id}", response_model=CartOut)
+@router.put("/{cart_id}/items/{item_id}")
 def update_item(cart_id: int, item_id: int, update: CartItemUpdate, db: Session = Depends(get_db)):
     cart = CartService.update_quantity(db, cart_id, item_id, update.quantity)
     if not cart:
         raise HTTPException(status_code=404, detail="Cart or item not found")
-    return cart
+    return cart_with_names(cart, db)
 
 
-@router.delete("/{cart_id}/items/{item_id}", response_model=CartOut)
+@router.delete("/{cart_id}/items/{item_id}")
 def remove_item(cart_id: int, item_id: int, db: Session = Depends(get_db)):
     cart = CartService.remove_item(db, cart_id, item_id)
     if not cart:
         raise HTTPException(status_code=404, detail="Cart or item not found")
-    return cart
+    return cart_with_names(cart, db)
 
 
 @router.get("/{cart_id}/calculate", response_model=CartCalculateResponse)

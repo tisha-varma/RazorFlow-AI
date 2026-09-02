@@ -2,13 +2,15 @@
 
 import { Product } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
-import { Package } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Package, ShoppingCart } from "lucide-react";
 
 interface ProductCardProps {
   product: Product;
+  onAddToCart?: (product: Product) => void;
 }
 
-export function ProductCard({ product }: ProductCardProps) {
+export function ProductCard({ product, onAddToCart }: ProductCardProps) {
   const formatPaise = (paise: number) =>
     `₹${(paise / 100).toLocaleString("en-IN")}`;
 
@@ -32,8 +34,19 @@ export function ProductCard({ product }: ProductCardProps) {
             ))}
           </div>
         </div>
-        <div className="text-right shrink-0">
+        <div className="flex flex-col items-end gap-2 shrink-0">
           <p className="text-sm font-bold text-white">{formatPaise(product.base_price_paise)}</p>
+          {onAddToCart && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => onAddToCart(product)}
+              className="border-violet-500/30 text-violet-400 hover:bg-violet-500/10 h-8 px-2"
+            >
+              <ShoppingCart className="h-3.5 w-3.5 mr-1" />
+              Add
+            </Button>
+          )}
         </div>
       </div>
     </div>

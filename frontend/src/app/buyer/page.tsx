@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { ChatPanel } from "@/components/chat/ChatPanel";
 import { CommercePanel } from "@/components/commerce/CommercePanel";
@@ -15,6 +15,13 @@ export default function BuyerPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [cart, setCart] = useState<Cart | null>(null);
   const [policyActive, setPolicyActive] = useState(false);
+  const chatRef = useRef<{ sendMessage: (msg: string) => void } | null>(null);
+  const cartRef = useRef<Cart | null>(null);
+
+  // Keep cartRef in sync
+  useEffect(() => {
+    cartRef.current = cart;
+  }, [cart]);
 
   useEffect(() => {
     fetchJson("/agent/session", { method: "POST" })
@@ -24,6 +31,114 @@ export default function BuyerPage() {
     fetchJson("/policy")
       .then(() => setPolicyActive(true))
       .catch(() => setPolicyActive(false));
+  }, []);
+
+  const fetchCart = useCallback(async (cartId: number) => {
+    try {
+      const cartData = await fetchJson(`/cart/${cartId}`);
+      setCart(cartData);
+      return cartData;
+    } catch (e) {
+      console.error("Failed to fetch cart:", e);
+      return null;
+    }
+  }, []);
+
+  const handleUpdateQuantity = useCallback(async (itemId: number, quantity: number) => {
+    const currentCart = cartRef.current;
+    if (!currentCart) return;
+
+    const item = currentCart.items?.find((i) => i.id === itemId);
+    if (!item) return;
+
+    const oldQty = item.quantity;
+    const action = quantity > oldQty ? "increased" : "decreased";
+
+    try {
+      // Update quantity
+      await fetchJson(`/cart/${currentCart.id}/items/${itemId}`, {
+        method: "PUT",
+        body: JSON.stringify({ quantity }),
+      });
+
+      // Fetch updated cart
+      const updatedCart = await fetchCart(currentCart.id);
+
+      // Send chat confirmation AFTER cart is updated
+      if (chatRef.current && updatedCart) {
+        chatRef.current.sendMessage(`I ${action} the quantity of ${item.product_name} to ${quantity}. What's the new total?`);
+      }
+    } catch (e) {
+      console.error("Failed to update quantity:", e);
+    }
+  }, [fetchCart]);
+
+  const handleRemoveItem = useCallback(async (itemId: number) => {
+    const currentCart = cartRef.current;
+    if (!currentCart) return;
+
+    const item = currentCart.items?.find((i) => i.id === itemId);
+    if (!item) return;
+
+    try {
+      await fetchJson(`/cart/${currentCart.id}/items/${itemId}`, {
+        method: "DELETE",
+      });
+
+      const updatedCart = await fetchCart(currentCart.id);
+
+      if (chatRef.current) {
+        chatRef.current.sendMessage(`I removed ${item.product_name} from my cart`);
+      }
+    } catch (e) {
+      console.error("Failed to remove item:", e);
+    }
+  }, [fetchCart]);
+
+  const handleAddToCart = useCallback(async (product: Product) => {
+    const currentCart = cartRef.current;
+
+    try {
+      if (!currentCart) {
+        // Create cart first
+        const newCart = await fetchJson("/cart", {
+          method: "POST",
+          body: JSON.stringify({ session_id: sessionId, merchant_id: 1 }),
+        });
+        setCart(newCart);
+        cartRef.current = newCart;
+
+        await fetchJson(`/cart/${newCart.id}/items`, {
+          method: "POST",
+          body: JSON.stringify({ product_id: product.id, quantity: 1 }),
+        });
+
+        const updatedCart = await fetchCart(newCart.id);
+
+        if (chatRef.current) {
+          chatRef.current.sendMessage(`I added ${product.name} to my cart`);
+        }
+      } else {
+        await fetchJson(`/cart/${currentCart.id}/items`, {
+          method: "POST",
+          body: JSON.stringify({ product_id: product.id, quantity: 1 }),
+        });
+
+        const updatedCart = await fetchCart(currentCart.id);
+
+        if (chatRef.current) {
+          chatRef.current.sendMessage(`I added ${product.name} to my cart`);
+        }
+      }
+    } catch (e) {
+      console.error("Failed to add to cart:", e);
+    }
+  }, [sessionId, fetchCart]);
+
+  const handleCheckout = useCallback(() => {
+    if (chatRef.current) {
+      chatRef.current.sendMessage("I want to checkout now");
+    }
   }, []);
 
   if (!sessionId) {
@@ -70,13 +185,21 @@ export default function BuyerPage() {
       <div className="flex-1 flex overflow-hidden">
         <div className="w-1/2 min-w-0">
           <ChatPanel
+            ref={chatRef}
             sessionId={sessionId}
             onProductsFound={setProducts}
             onCartUpdate={setCart}
           />
         </div>
         <div className="w-1/2 min-w-0">
-          <CommercePanel products={products} cart={cart} />
+          <CommercePanel
+            products={products}
+            cart={cart}
+            onAddToCart={handleAddToCart}
+            onUpdateQuantity={handleUpdateQuantity}
+            onRemoveItem={handleRemoveItem}
+            onCheckout={handleCheckout}
+          />
         </div>
       </div>
     </div>
