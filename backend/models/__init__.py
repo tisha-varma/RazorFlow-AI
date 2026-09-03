@@ -8,6 +8,7 @@ from backend.models.payment import RazorpayPayment
 from backend.models.approval import Approval
 from backend.models.audit import AuditEvent
 from backend.models.ai_interaction import AIInteraction
+from backend.models.session_state import SessionStateEvent
 from backend.models.revenue import RevenueMetric
 from backend.models.upload import CatalogUpload
 
@@ -27,6 +28,7 @@ __all__ = [
     "Approval",
     "AuditEvent",
     "AIInteraction",
+    "SessionStateEvent",
     "RevenueMetric",
     "CatalogUpload",
 ]

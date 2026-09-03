@@ -138,6 +138,9 @@ razorflow-ai/
 - **No auth.** Buyer sessions are unsecured localStorage IDs; the merchant console has no login.
 - **Upsell fallback is rule-based (tags), not personalized.** Explicit merchant relations win; everything else matches on shared tags.
 - **Product photos are static seed assets**, not merchant-uploaded; catalog uploads don't attach images.
+- **Synthetic baseline methodology.** The dashboard's "no-upsell baseline" is derived from our own paid orders minus their upsell lines — there is no separate non-AI control group, and it is labeled as such in the API. Conversion rate is paid orders ÷ distinct AI sessions (an approximation; sessions that never touch the assistant aren't counted).
+- **Rate limiting is per-process memory** (120/min/IP on payment + checkout). It does not survive restarts and won't hold across multiple server instances.
+- **Demo triggers synthesize the gateway capture** for the success path (flagged `simulated: true` in audit data) so the stage demo never depends on live LLM output; the Razorpay order itself is real. The failure path exercises the genuine rejection code.
 
 ## Phase 2 Completion Summary
 

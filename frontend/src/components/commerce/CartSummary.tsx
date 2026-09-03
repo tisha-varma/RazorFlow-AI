@@ -160,12 +160,17 @@ export function CartSummary({ cart, onUpdateQuantity, onRemoveItem, onCheckout }
           </span>
         </div>
         {onCheckout && (
-          <Button
-            onClick={onCheckout}
-            className="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-[15px] font-semibold mt-3 h-11 shadow-sm"
-          >
-            Proceed to Checkout
-          </Button>
+          <>
+            <Button
+              onClick={onCheckout}
+              className="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-[15px] font-semibold mt-3 h-11 shadow-sm"
+            >
+              Proceed to Checkout
+            </Button>
+            <p className="mt-1.5 text-center text-[11px] font-semibold tracking-wide text-slate-400">
+              TEST MODE · no real money moves
+            </p>
+          </>
         )}
       </div>
     </div>

@@ -119,6 +119,20 @@ class CartService:
         else:
             unit_price = product.base_price_paise
 
+        # Upsell inference (backup for the LLM flag): an item that complements
+        # something already in the cart is upsell revenue by definition.
+        # Explicit is_upsell=True is always respected.
+        if not is_upsell:
+            from backend.services.catalog_service import CatalogService
+            other_ids = {
+                i.product_id for i in cart.items if i.product_id != product_id
+            }
+            for pid in other_ids:
+                related, _ = CatalogService.get_related_products_with_source(db, pid)
+                if product_id in {r.id for r in related}:
+                    is_upsell = True
+                    break
+
         # Check if item already exists in cart (same product + variant)
         existing_item = db.query(CartItem).filter(
             CartItem.cart_id == cart_id,

@@ -6,6 +6,7 @@ import { ChatPanel } from "@/components/chat/ChatPanel";
 import { CommercePanel } from "@/components/commerce/CommercePanel";
 import { AuditTrail } from "@/components/audit/AuditTrail";
 import { SessionLimitBar } from "@/components/commerce/SessionLimitBar";
+import { DemoControls } from "@/components/demo/DemoControls";
 import { Product, Cart } from "@/lib/types";
 import { fetchJson } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -169,6 +170,30 @@ export default function BuyerPage() {
     }
   }, []);
 
+  const handleDemoResult = useCallback(async (result: Record<string, unknown>) => {
+    // Reset: wipe all local commerce state for a clean restart.
+    if (typeof result.scope === "string") {
+      setCart(null);
+      setProducts([]);
+      setUpsellProducts([]);
+      setApprovalId(null);
+      setApprovedId(null);
+      return;
+    }
+    // Triggers: refresh the cart view; upsell scenarios also set candidates.
+    const cartId = result.cart_id;
+    if (typeof cartId === "number") {
+      await fetchCart(cartId);
+    }
+    if (Array.isArray(result.upsell)) {
+      setUpsellProducts(result.upsell as Product[]);
+    }
+    if (result.status === "paid" || result.status === "failed") {
+      setApprovalId(null);
+      setApprovedId(null);
+    }
+  }, [fetchCart]);
+
   // Products already in the cart are hidden from discovery lists —
   // the panel shows what you can still add, latest recommendations first.
   const cartProductIds = new Set((cart?.items ?? []).map((i) => i.product_id));
@@ -232,6 +257,8 @@ export default function BuyerPage() {
           </span>
         </div>
       </header>
+
+      <DemoControls sessionId={sessionId} onDone={handleDemoResult} />
 
       {showAudit && (
         <div className="h-72 shrink-0 overflow-hidden border-b border-slate-200 bg-white px-4 py-3 shadow-sm">

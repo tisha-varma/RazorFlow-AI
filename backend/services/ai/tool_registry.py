@@ -413,7 +413,7 @@ def create_tool_registry() -> ToolRegistry:
                 },
                 "is_upsell": {
                     "type": "boolean",
-                    "description": "Whether this is an upsell item (default: false)"
+                    "description": "Whether this is an upsell item (default: false - auto-detected when it complements cart contents)"
                 }
             },
             "required": ["product_id"]

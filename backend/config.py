@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     RAZORPAY_KEY_SECRET: str = ""
     RAZORPAY_WEBHOOK_SECRET: str = ""
 
+    # Demo controls (reset + scripted triggers). Dev/demo only: set false
+    # to hide them as you would in a production view.
+    DEMO_MODE: bool = True
+
     # Database
     DATABASE_URL: str = "sqlite:///./razorflow.db"
 

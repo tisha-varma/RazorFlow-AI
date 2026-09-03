@@ -36,6 +36,13 @@ VALID_TRANSITIONS = {
 class StateMachine:
     def __init__(self):
         self._sessions: dict[str, SessionState] = {}
+        self._recorder = None
+
+    def on_transition(self, fn):
+        """Register a (session_id, from_state, to_state) listener fired on
+        every successful transition. Used for funnel persistence."""
+        self._recorder = fn
+        return fn
 
     def get_state(self, session_id: str) -> SessionState:
         return self._sessions.get(session_id, SessionState.IDLE)
@@ -44,6 +51,11 @@ class StateMachine:
         current = self.get_state(session_id)
         if state in VALID_TRANSITIONS.get(current, []):
             self._sessions[session_id] = state
+            if self._recorder is not None:
+                try:
+                    self._recorder(session_id, current.value, state.value)
+                except Exception as e:
+                    print(f"[STATE] recorder failed: {e}")
             return True
         return False
 

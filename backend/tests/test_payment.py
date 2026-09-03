@@ -280,6 +280,150 @@ class TestFailedSpend:
         assert usage["remaining_paise"] == 1000000 - 449900
 
 
+class TestSignatureCrypto:
+    def test_real_hmac_valid_and_tampered(self, monkeypatch):
+        import hmac as hmac_lib
+        import hashlib
+        from backend.config import settings
+        from backend.services import payment_service as ps
+
+        monkeypatch.setattr(settings, "RAZORPAY_KEY_ID", "rzp_test_x")
+        monkeypatch.setattr(settings, "RAZORPAY_KEY_SECRET", "testsecret123")
+        order_id, pay_id = "order_crypto1", "pay_crypto1"
+        good_sig = hmac_lib.new(
+            b"testsecret123", f"{order_id}|{pay_id}".encode(), hashlib.sha256
+        ).hexdigest()
+        assert ps.verify_payment_signature(order_id, pay_id, good_sig) is True
+        # Tampered payment id against the same signature must fail.
+        assert ps.verify_payment_signature(order_id, "pay_other", good_sig) is False
+        assert ps.verify_payment_signature(order_id, pay_id, "0" * 64) is False
+
+
+class TestRateLimit:
+    def test_payment_config_trips_after_120(self, client):
+        from backend.services import rate_limit
+        rate_limit.reset_for_tests()
+        try:
+            for _ in range(120):
+                assert client.get("/api/payment/config").status_code == 200
+            limited = client.get("/api/payment/config")
+            assert limited.status_code == 429
+            assert "Retry-After" in limited.headers
+        finally:
+            rate_limit.reset_for_tests()
+
+    @pytest.mark.asyncio
+    async def test_scopes_are_independent(self):
+        from backend.services.rate_limit import limit
+        from fastapi import Request
+
+        class FakeClient:
+            host = "10.9.9.9"
+
+        class FakeRequest:
+            client = FakeClient()
+
+        check = limit("test-scope-xyz", 2)
+        await check(FakeRequest())
+        await check(FakeRequest())
+        try:
+            await check(FakeRequest())
+            raise AssertionError("expected 429")
+        except Exception as e:
+            assert getattr(e, "status_code", None) == 429
+
+
+class TestEndToEndAuditChain:
+    @pytest.mark.asyncio
+    async def test_discovery_to_paid_audit_trail(self, client, db_session, seed_data, monkeypatch):
+        import sys
+        sys.path.insert(0, ".")
+        from backend.services.ai.agent import Agent
+        from backend.services.ai.llm_client import TextResponse, ToolCallResponse
+        from backend.models.audit import AuditEvent
+        from backend.models.order import Order
+
+        p1 = seed_data["p1"]
+        session_id = "e2e-chain-1"
+
+        agent = Agent(_FakeLLM(p1.id))
+        await agent.handle_message(db_session, session_id, "marathon shoes under 5000")
+        await agent.handle_message(db_session, session_id, "add RunPro Sprint to my cart")
+        result = await agent.handle_message(db_session, session_id, "checkout please")
+        assert result["state"] == "AWAITING_APPROVAL"
+        approval_id = result["cart"]["approval_id"]
+
+        client.post(f"/api/checkout/approve/{approval_id}", json={"session_id": session_id})
+
+        from backend.services import payment_service as ps
+        monkeypatch.setattr(
+            ps, "create_razorpay_order",
+            lambda amount, receipt, notes=None: {
+                "razorpay_order_id": "order_e2e1", "amount_paise": amount,
+                "currency": "INR", "status": "created"
+            }
+        )
+        monkeypatch.setattr(ps, "verify_payment_signature", lambda *a: True)
+        created = client.post(
+            f"/api/payment/create-order/{approval_id}", json={"session_id": session_id}
+        )
+        assert created.status_code == 200
+        verified = client.post("/api/payment/verify", json={
+            "razorpay_order_id": "order_e2e1",
+            "razorpay_payment_id": "pay_e2e1",
+            "razorpay_signature": "sig",
+            "session_id": session_id,
+        })
+        assert verified.json()["status"] == "paid"
+
+        db_session.expire_all()
+        chain = [
+            e.event_type for e in db_session.query(AuditEvent).filter(
+                AuditEvent.session_id == session_id
+            ).order_by(AuditEvent.id).all()
+        ]
+        for expected in (
+            "USER_INTENT_RECEIVED", "SEARCH_PERFORMED", "CART_ITEM_ADDED",
+            "POLICY_CHECK_PASSED", "PAYMENT_APPROVAL_REQUESTED",
+            "PAYMENT_APPROVED", "PAYMENT_ORDER_CREATED",
+            "PAYMENT_SUCCESS", "ORDER_CONFIRMED"
+        ):
+            assert expected in chain, f"missing {expected} in {chain}"
+        # Order of money events is causal.
+        assert chain.index("PAYMENT_ORDER_CREATED") < chain.index("PAYMENT_SUCCESS")
+        assert chain.index("PAYMENT_SUCCESS") < chain.index("ORDER_CONFIRMED")
+
+        order = db_session.query(Order).filter(Order.session_id == session_id).one()
+        assert order.status == "paid"
+
+
+class _FakeLLM:
+    """Scripted multi-turn fake: one tool call per user turn, then text
+    (mirrors a real model answering after its tools instead of looping)."""
+
+    def __init__(self, product_id):
+        self.calls = 0
+        self.product_id = product_id
+        self._tooled: set = set()
+
+    async def generate(self, messages, tools=None, system_prompt=None):
+        from backend.services.ai.llm_client import TextResponse, ToolCallResponse
+        self.calls += 1
+        last_user = next(
+            (m.get("content", "") for m in reversed(messages) if m.get("role") == "user"),
+            ""
+        )
+        if last_user not in self._tooled:
+            self._tooled.add(last_user)
+            if "marathon" in last_user:
+                return [ToolCallResponse("search_products", {"query": "running"}, "c1")]
+            if "add RunPro" in last_user:
+                return [ToolCallResponse(
+                    "add_to_cart", {"cart_id": 0, "product_id": self.product_id}, "c2"
+                )]
+        return TextResponse(text="Done.")
+
+
 def _signed_webhook(secret, payload_dict):
     body = json.dumps(payload_dict, separators=(",", ":")).encode()
     sig = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()

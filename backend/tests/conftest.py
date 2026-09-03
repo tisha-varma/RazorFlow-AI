@@ -16,6 +16,13 @@ TEST_DATABASE_URL = "sqlite:///./test_razorflow.db"
 test_engine = create_engine(TEST_DATABASE_URL, connect_args={"check_same_thread": False})
 TestSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
 
+# Route state-transition persistence at import time so set_state() calls in
+# tests land in the isolated test DB, never the dev database.
+from backend.services import session_state_log as _ssl
+from backend.services.state_machine import state_machine as _sm
+_ssl.configure(TestSessionLocal, force=True)
+_sm.on_transition(_ssl.record_transition)
+
 
 @pytest.fixture(scope="function")
 def db_session():

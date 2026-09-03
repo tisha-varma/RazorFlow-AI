@@ -77,6 +77,35 @@ class TestCartEndpoints:
         resp = client.get("/api/cart/9999")
         assert resp.status_code == 404
 
+    def test_related_second_item_inferred_upsell(self, client, seed_data):
+        # p3 (socks) complements p1 (explicit relation) -> upsell even unflagged.
+        p1 = seed_data["p1"]
+        p3 = seed_data["p3"]
+        cart = client.post("/api/cart", json={"session_id": "upsell-inf", "merchant_id": 1}).json()
+        client.post(f"/api/cart/{cart['id']}/items", json={"product_id": p1.id, "quantity": 1})
+        resp = client.post(f"/api/cart/{cart['id']}/items", json={"product_id": p3.id, "quantity": 1})
+        items = {i["product_name"]: i for i in resp.json()["items"]}
+        assert items["RunPro Sprint"]["is_upsell"] is False
+        assert items["Running Socks"]["is_upsell"] is True
+
+    def test_unrelated_second_item_not_upsell(self, client, seed_data, db_session):
+        from backend.models import Product
+        merchant_id = seed_data["merchant"].id
+        lone = Product(
+            merchant_id=merchant_id, name="Lone Cap", description="d",
+            category="Accessories", base_price_paise=10000,
+            tags=["unrelated999"], is_active=True
+        )
+        db_session.add(lone)
+        db_session.commit()
+
+        p1 = seed_data["p1"]
+        cart = client.post("/api/cart", json={"session_id": "upsell-neg", "merchant_id": 1}).json()
+        client.post(f"/api/cart/{cart['id']}/items", json={"product_id": p1.id, "quantity": 1})
+        resp = client.post(f"/api/cart/{cart['id']}/items", json={"product_id": lone.id, "quantity": 1})
+        items = {i["product_name"]: i for i in resp.json()["items"]}
+        assert items["Lone Cap"]["is_upsell"] is False
+
     def test_add_item_returns_policy_allowed(self, client, seed_data):
         p1 = seed_data["p1"]
         cart = client.post("/api/cart", json={"session_id": "test-sess", "merchant_id": 1}).json()
