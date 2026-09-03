@@ -40,7 +40,7 @@ function BarPair({
           </div>
           <div className="h-2.5 overflow-hidden rounded-full bg-slate-100">
             <div
-              className="h-full rounded-full bg-emerald-500 transition-[width] duration-500"
+              className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-400 shadow-[0_0_8px_rgba(16,185,129,0.5)] transition-[width] duration-500"
               style={{ width: `${(withValue / max) * 100}%` }}
             />
           </div>
@@ -75,8 +75,13 @@ export function ImpactChart({
   ordersWithUpsell,
 }: ImpactChartProps) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-      <h2 className="text-sm font-semibold text-slate-900">Revenue impact</h2>
+    <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-[0_8px_24px_-12px_rgba(15,23,42,0.2)]">
+      <div className="flex items-center gap-2">
+        <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 text-sm font-bold text-white shadow-sm" aria-hidden="true">
+          ₹
+        </span>
+        <h2 className="text-sm font-semibold text-slate-900">Revenue impact</h2>
+      </div>
       <p className="mt-1 text-[13px] leading-relaxed text-slate-600" aria-live="polite">
         {orderCount === 0 ? (
           "No paid orders yet — complete a purchase to see the upsell lift."

@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
+  FlaskConical,
   ScrollText,
   RefreshCw,
   MessageSquare,
@@ -68,6 +69,7 @@ const LABELS: Record<string, string> = {
   PAYMENT_ORDER_CREATED: "Razorpay order created",
   PAYMENT_ORDER_FAILED: "Payment order failed",
   PAYMENT_SUCCESS: "Payment success",
+  DEMO_SIMULATED_CAPTURE: "Demo simulated capture",
   ORDER_CONFIRMED: "Order confirmed",
   PAYMENT_FAILED: "Payment failed",
 };
@@ -96,6 +98,7 @@ const EVENT_ICONS: Record<string, typeof Search> = {
   PAYMENT_ORDER_CREATED: Receipt,
   PAYMENT_ORDER_FAILED: AlertTriangle,
   PAYMENT_SUCCESS: BadgeCheck,
+  DEMO_SIMULATED_CAPTURE: FlaskConical,
   ORDER_CONFIRMED: PackageCheck,
   PAYMENT_FAILED: XCircle,
 };
@@ -117,6 +120,7 @@ const EVENT_CHIP: Record<string, string> = {
   PAYMENT_ORDER_CREATED: "bg-indigo-100 text-indigo-700",
   PAYMENT_ORDER_FAILED: "bg-red-100 text-red-700",
   PAYMENT_SUCCESS: "bg-emerald-100 text-emerald-700",
+  DEMO_SIMULATED_CAPTURE: "bg-amber-100 text-amber-800",
   ORDER_CONFIRMED: "bg-emerald-100 text-emerald-700",
   PAYMENT_FAILED: "bg-red-100 text-red-700",
 };
@@ -217,6 +221,10 @@ function detailFor(event: AuditEvent): string | null {
     }
     case "PAYMENT_FAILED":
       return str(d.reason);
+    case "DEMO_SIMULATED_CAPTURE": {
+      const order = str(d.order_number) ?? `order #${String(d.order_id ?? "?")}`;
+      return `${order} · synthetic capture (demo trigger, no money moved)`;
+    }
     default:
       return null;
   }

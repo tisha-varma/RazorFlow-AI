@@ -39,15 +39,34 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
     // Optimistic staged feedback while the agent works: the tool_calls list
     // only arrives post-hoc, so rotate plausible stages client-side until
-    // the response lands. Cleared the moment data arrives.
-    const startActivityCycle = useCallback(() => {
-      const stages = [
-        "Searching catalog…",
-        "Comparing products…",
-        "Checking stock…",
-        "Verifying policy…",
-        "Preparing answer…",
-      ];
+    // the response lands. Cleared the moment data arrives. Stages are picked
+    // from the message intent so checkout never reads as "Searching catalog".
+    const startActivityCycle = useCallback((message: string) => {
+      const m = (message || "").toLowerCase();
+      let stages: string[];
+      if (/(checkout|check out|approve|approval|pay|payment|order|buy|place)/.test(m)) {
+        stages = [
+          "Verifying policy…",
+          "Creating approval…",
+          "Locking order total…",
+          "Preparing answer…",
+        ];
+      } else if (/(cart|add|remove|quantity|qty)/.test(m)) {
+        stages = [
+          "Updating cart…",
+          "Rechecking policy…",
+          "Refreshing totals…",
+          "Preparing answer…",
+        ];
+      } else {
+        stages = [
+          "Searching catalog…",
+          "Comparing products…",
+          "Checking stock…",
+          "Verifying policy…",
+          "Preparing answer…",
+        ];
+      }
       let i = 0;
       setActivity(stages[0]);
       if (activityTimer.current) clearInterval(activityTimer.current);
@@ -103,7 +122,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       setLoading(true);
 
       try {
-        startActivityCycle();
+        startActivityCycle(message);
 
         const data = await fetchJson("/agent/chat", {
           method: "POST",
@@ -168,22 +187,50 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       await sendToAgent(msg);
     };
 
+    const suggestions = [
+      "Marathon shoes under ₹5,000",
+      "Trail shoes for beginners",
+      "Show running accessories",
+    ];
+
     return (
-      <div className="flex flex-col h-full bg-white border-r border-slate-200">
-        <div className="border-b border-slate-200 px-4 py-3 flex items-center gap-2 bg-white">
-          <Sparkles className="h-4 w-4 text-indigo-600" aria-hidden="true" />
-          <h2 className="text-[15px] font-semibold text-slate-900">SprintGear AI</h2>
-          <Badge variant="outline" className="text-xs border-emerald-200 text-emerald-700 bg-emerald-50 ml-auto">
+      <div className="flex flex-col h-full bg-white/80 backdrop-blur-sm border-r border-slate-200/80">
+        <div className="border-b border-slate-200/80 px-4 py-3 flex items-center gap-2.5 bg-white/90">
+          <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 shadow-[0_4px_12px_-2px_rgba(79,70,229,0.5)]" aria-hidden="true">
+            <Sparkles className="h-4 w-4 text-white" />
+          </span>
+          <div className="leading-tight">
+            <h2 className="text-[15px] font-semibold text-slate-900">SprintGear AI</h2>
+            <p className="text-[11px] text-slate-500">Bounded · explainable · gated</p>
+          </div>
+          <Badge variant="outline" className="text-xs border-emerald-200 text-emerald-700 bg-emerald-50 ml-auto gap-1">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" aria-hidden="true" />
             Online
           </Badge>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-stone-50">
-          {messages.length === 0 && (
-            <div className="flex flex-col items-center justify-center h-full text-center">
-              <Sparkles className="h-8 w-8 mb-3 text-slate-300" aria-hidden="true" />
-              <p className="text-[15px] font-medium text-slate-700">Ask about running shoes, trail gear, or accessories.</p>
-              <p className="text-[13px] mt-1.5 text-slate-500">Example: "I need marathon shoes under ₹5,000"</p>
+        <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-[radial-gradient(ellipse_at_top,rgba(99,102,241,0.06),transparent_60%)]">
+          {messages.length === 0 && !loading && (
+            <div className="flex flex-col items-center justify-center h-full text-center px-2">
+              <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 shadow-[0_8px_24px_-6px_rgba(79,70,229,0.5)] mb-4" aria-hidden="true">
+                <Sparkles className="h-6 w-6 text-white" />
+              </span>
+              <p className="text-[16px] font-semibold text-slate-800">What are you training for?</p>
+              <p className="text-[13px] mt-1.5 text-slate-500 max-w-[280px] leading-relaxed">
+                Ask about running shoes, trail gear, or accessories — I&apos;ll check policy before anything costs money.
+              </p>
+              <div className="mt-4 flex flex-col gap-2 w-full max-w-[280px]">
+                {suggestions.map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => sendToAgent(s)}
+                    className="rounded-xl border border-indigo-200/80 bg-white px-3 py-2 text-left text-[13px] text-indigo-800 shadow-sm transition-all hover:-translate-y-px hover:border-indigo-300 hover:shadow-md active:translate-y-0"
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 
@@ -196,13 +243,13 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
           <div ref={messagesEndRef} />
         </div>
 
-        <div className="border-t border-slate-200 bg-white p-4">
+        <div className="border-t border-slate-200/80 bg-white/90 p-4">
           <form
             onSubmit={(e) => {
               e.preventDefault();
               sendMessage();
             }}
-            className="flex gap-2"
+            className="flex items-center gap-2 rounded-full border border-slate-300 bg-white py-1.5 pl-4 pr-1.5 shadow-sm transition-colors focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-100"
           >
             <label htmlFor="chat-input" className="sr-only">
               Ask about products
@@ -214,14 +261,14 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
               placeholder="Ask about products…"
               disabled={loading}
               autoComplete="off"
-              className="bg-white border-slate-300 text-slate-900 text-[14px] placeholder:text-slate-400 focus-visible:ring-indigo-500"
+              className="border-0 bg-transparent p-0 text-slate-900 text-[14px] placeholder:text-slate-400 shadow-none focus-visible:ring-0"
             />
             <Button
               type="submit"
               disabled={loading || !input.trim()}
               size="icon"
               aria-label="Send message"
-              className="bg-indigo-600 hover:bg-indigo-500 text-white shrink-0 touch-manipulation"
+              className="h-9 w-9 shrink-0 rounded-full bg-gradient-to-br from-indigo-600 to-violet-600 text-white shadow-md transition-transform hover:scale-105 active:scale-95 disabled:opacity-40 disabled:hover:scale-100 touch-manipulation"
             >
               <Send className="h-4 w-4" aria-hidden="true" />
             </Button>

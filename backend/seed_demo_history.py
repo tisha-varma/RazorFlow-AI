@@ -14,20 +14,31 @@ from datetime import datetime, timedelta
 sys.path.insert(0, "C:/projects/RazorFLow AI/backend")
 sys.path.insert(0, "C:/projects/RazorFLow AI")
 
-COUNT = 24
-if "--count" in sys.argv:
-    COUNT = int(sys.argv[sys.argv.index("--count") + 1])
+DEFAULT_COUNT = 24
 
-from backend.database import SessionLocal
-from backend.models.cart import Cart, CartItem
-from backend.models.order import Order, OrderItem
-from backend.models.payment import RazorpayPayment
-from backend.models.approval import Approval
-from backend.models.ai_interaction import AIInteraction
-from backend.models.product import Product
 
-db = SessionLocal()
-try:
+def run_seed(count: int = DEFAULT_COUNT) -> int:
+    """Seed deterministic HIST-* demo history. Idempotent: clears prior
+    HIST- rows first, then recreates. Returns the number of orders seeded.
+    Safe to call from the demo API (uses its own short-lived session)."""
+    from backend.database import SessionLocal
+    from backend.models.cart import Cart, CartItem
+    from backend.models.order import Order, OrderItem
+    from backend.models.payment import RazorpayPayment
+    from backend.models.approval import Approval
+    from backend.models.ai_interaction import AIInteraction
+    from backend.models.product import Product
+
+    db = SessionLocal()
+    try:
+        return _seed(db, count, Product, Cart, CartItem, Order, OrderItem,
+                     RazorpayPayment, Approval, AIInteraction)
+    finally:
+        db.close()
+
+
+def _seed(db, count, Product, Cart, CartItem, Order, OrderItem,
+          RazorpayPayment, Approval, AIInteraction) -> int:
     # Idempotent: clear prior HIST- demo history first.
     hist_orders = db.query(Order).filter(Order.order_number.like("HIST-%")).all()
     hist_ids = [o.id for o in hist_orders]
@@ -54,7 +65,7 @@ try:
     merchant_id = shoes[0].merchant_id
     now = datetime.now()
 
-    for i in range(COUNT):
+    for i in range(count):
         sess = f"hist-d{i // 4}-{i}"
         day_offset = (i * 5) % 7  # spread across the last 7 days, deterministic
         # Day-0 orders pin to right now so "today" is never empty at any hour.
@@ -106,6 +117,12 @@ try:
                              interaction_type="search", user_message="demo history",
                              ai_response="demo history", tool_calls=[]))
     db.commit()
-    print(f"seeded {COUNT} HIST- orders (cart+items, approval, payment, session each)")
-finally:
-    db.close()
+    print(f"seeded {count} HIST- orders (cart+items, approval, payment, session each)")
+    return count
+
+
+if __name__ == "__main__":
+    COUNT = DEFAULT_COUNT
+    if "--count" in sys.argv:
+        COUNT = int(sys.argv[sys.argv.index("--count") + 1])
+    run_seed(COUNT)

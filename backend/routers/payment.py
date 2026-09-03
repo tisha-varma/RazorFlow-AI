@@ -14,6 +14,7 @@ from backend.schemas.payment import (
     PaymentConfigOut,
     CreateOrderRequest,
     CreateOrderResponse,
+    PaymentStatusResponse,
     VerifyPaymentRequest,
     VerifyPaymentResponse,
     WebhookResult,
@@ -372,6 +373,37 @@ def verify_payment(req: VerifyPaymentRequest, db: Session = Depends(get_db)):
         order_number=order.order_number,
         total_paise=order.total_paise,
         razorpay_payment_id=req.razorpay_payment_id,
+    )
+
+
+@router.get("/status/{razorpay_order_id}", response_model=PaymentStatusResponse)
+def payment_status(razorpay_order_id: str, session_id: str, db: Session = Depends(get_db)):
+    """Reconciliation read for the client poll loop.
+
+    Covers the gap where money moved at Razorpay but the browser never got
+    the callback (JS crash, network drop, closed tab): the webhook may have
+    already marked the order paid while the UI still shows pending. The
+    frontend polls this after an ambiguous close/verify-error; a paid answer
+    flips it to success, a pending answer after the poll window earns the
+    honest "processing" copy. Session-scoped so one session can't read
+    another's orders.
+    """
+    payment = (
+        db.query(RazorpayPayment)
+        .filter(RazorpayPayment.razorpay_order_id == razorpay_order_id)
+        .first()
+    )
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment order not found")
+    if payment.order.session_id != session_id:
+        raise HTTPException(status_code=403, detail="Session mismatch")
+    return PaymentStatusResponse(
+        status=payment.order.status,
+        order_id=payment.order.id,
+        order_number=payment.order.order_number,
+        total_paise=payment.order.total_paise,
+        verified=payment.verified,
+        razorpay_payment_id=payment.razorpay_payment_id,
     )
 
 

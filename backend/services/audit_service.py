@@ -60,7 +60,9 @@ class AuditService:
     @staticmethod
     def verify_chain(db: Session) -> Dict[str, Any]:
         """Recompute every link. Returns ok / break_at_id / checked counts.
-        Rows predating the chain (NULL hash) are reported, not failed."""
+        Rows predating the chain (NULL hash) are reported, not failed — and
+        `prev` is reset to GENESIS over them, mirroring exactly what
+        log_event() chained off when it wrote the following row."""
         events = db.query(AuditEvent).order_by(AuditEvent.id.asc()).all()
         prev = GENESIS_HASH
         checked = 0
@@ -68,6 +70,7 @@ class AuditService:
         for event in events:
             if not event.event_hash:
                 legacy += 1
+                prev = GENESIS_HASH
                 continue
             expected = compute_hash(
                 event.prev_hash, event.event_type,

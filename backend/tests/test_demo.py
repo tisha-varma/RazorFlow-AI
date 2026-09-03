@@ -67,7 +67,16 @@ class TestDemoTriggers:
             AuditEvent.related_entity_id == order.id
         ).all()
         assert len(success) == 1  # no duplicate success events
-        assert success[0].event_data["simulated"] is True
+        # Honesty lives in its own append-only event now: the SUCCESS row
+        # must stay pristine so its chain hash verifies.
+        assert "simulated" not in success[0].event_data
+        sim = db_session.query(AuditEvent).filter(
+            AuditEvent.event_type == "DEMO_SIMULATED_CAPTURE",
+            AuditEvent.related_entity_id == order.id
+        ).all()
+        assert len(sim) == 1
+        assert sim[0].event_data["simulated"] is True
+        assert sim[0].event_data["source"] == "demo-trigger"
 
     def test_payment_failure_marks_failed(self, client, db_session, seed_data, monkeypatch):
         from backend.models.order import Order
@@ -98,3 +107,36 @@ class TestDemoGate:
         assert client.get("/api/demo/status").json() == {"demo_mode": False}
         assert client.post("/api/demo/reset").status_code == 403
         assert client.post("/api/demo/run-successful-purchase").status_code == 403
+
+
+class TestSeedHistory:
+    def test_seed_history_idempotent(self, client):
+        from backend.models.order import Order
+        from backend.database import get_db
+
+        r1 = client.post("/api/demo/seed-history", params={"count": 6})
+        assert r1.status_code == 200
+        assert r1.json()["seeded"] == 6
+
+        db = next(get_db())
+        try:
+            first = sorted(o.order_number for o in db.query(Order).filter(
+                Order.order_number.like("HIST-%")).all())
+            assert first == [f"HIST-{i + 1:03d}" for i in range(6)]
+        finally:
+            db.close()
+
+        # Reseed replaces, never duplicates.
+        r2 = client.post("/api/demo/seed-history", params={"count": 6})
+        assert r2.json()["seeded"] == 6
+        db = next(get_db())
+        try:
+            assert db.query(Order).filter(
+                Order.order_number.like("HIST-%")).count() == 6
+        finally:
+            db.close()
+
+    def test_seed_history_gated(self, client, monkeypatch):
+        from backend.config import settings
+        monkeypatch.setattr(settings, "DEMO_MODE", False)
+        assert client.post("/api/demo/seed-history").status_code == 403

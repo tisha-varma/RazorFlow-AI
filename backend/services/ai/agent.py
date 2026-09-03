@@ -239,6 +239,54 @@ class Agent:
             return result[:2000] + "…[truncated]"
         return result
 
+    # System-driven chat echoes sent by the buyer UI (not typed by the
+    # customer). Answered deterministically with ZERO LLM calls: letting the
+    # model free-write here once hallucinated "order confirmed, total paid"
+    # for an approval that had never been paid.
+    _ECHO_APPROVAL_DONE = "Approval completed"
+    _ECHO_REJECTED = "I rejected the purchase"
+    _ECHO_PAID_PREFIX = "Payment successful for order"
+
+    def _system_echo_reply(
+        self,
+        db: Session,
+        session_id: str,
+        message: str,
+        merchant_id: int,
+        start_time: float,
+    ) -> Dict[str, Any] | None:
+        text = (message or "").strip()
+        if text == self._ECHO_APPROVAL_DONE:
+            reply = (
+                "Approved ✓ — your total is locked. The order is NOT paid yet: "
+                "complete the payment in the Commerce panel and I'll confirm "
+                "here the moment it verifies."
+            )
+        elif text == self._ECHO_REJECTED:
+            reply = (
+                "No problem — the purchase is cancelled and nothing was charged. "
+                "Your cart is intact if you want to change anything and try again."
+            )
+        elif text.startswith(self._ECHO_PAID_PREFIX):
+            match = re.search(r"order\s+(\S+)", text)
+            ref = match.group(1).rstrip(".") if match else "your order"
+            reply = (
+                f"Payment verified for {ref} — thank you for shopping with "
+                "SprintGear India! Let me know if you need anything else."
+            )
+        else:
+            return None
+        snapshot = self._cart_snapshot(db, session_id)
+        cart_data = (
+            {k: v for k, v in snapshot.items() if k != "cart"}
+            if snapshot is not None else None
+        )
+        return self._finalize(
+            db, session_id, message, merchant_id, start_time,
+            [], [], reply, [], [], cart_data,
+            tokens_used=0, llm_calls=0,
+        )
+
     def _finalize(
         self,
         db: Session,
@@ -321,6 +369,11 @@ class Agent:
         self._hydrate_history(db, session_id)
         history = self._get_history(session_id)
         history.append({"role": "user", "content": message})
+
+        # UI echoes are answered from fixed text — never the LLM.
+        echo = self._system_echo_reply(db, session_id, message, merchant_id, start_time)
+        if echo is not None:
+            return echo
 
         # Work on a copy for the LLM call (tool results are per-iteration)
         messages = list(history)

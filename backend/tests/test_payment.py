@@ -513,3 +513,37 @@ class TestWebhook:
         })
         assert resp.status_code == 200
         assert "unknown" in resp.json()["detail"]
+
+
+class TestPaymentStatus:
+    def test_pending_then_paid(self, client, seed_data, monkeypatch):
+        appr, data = TestVerify()._order_for(
+            client, seed_data, monkeypatch, "pay-st-1", "order_st1")
+
+        pending = client.get("/api/payment/status/order_st1",
+                             params={"session_id": "pay-st-1"}).json()
+        assert pending["status"] == "pending"
+        assert pending["verified"] is False
+
+        client.post("/api/payment/verify", json={
+            "razorpay_order_id": "order_st1",
+            "razorpay_payment_id": "pay_st1",
+            "razorpay_signature": "sig",
+            "session_id": "pay-st-1",
+        })
+        paid = client.get("/api/payment/status/order_st1",
+                          params={"session_id": "pay-st-1"}).json()
+        assert paid["status"] == "paid"
+        assert paid["verified"] is True
+        assert paid["razorpay_payment_id"] == "pay_st1"
+
+    def test_unknown_order_404(self, client):
+        resp = client.get("/api/payment/status/order_nope",
+                          params={"session_id": "pay-st-2"})
+        assert resp.status_code == 404
+
+    def test_session_mismatch_403(self, client, seed_data, monkeypatch):
+        TestVerify()._order_for(client, seed_data, monkeypatch, "pay-st-3", "order_st3")
+        resp = client.get("/api/payment/status/order_st3",
+                          params={"session_id": "someone-else"})
+        assert resp.status_code == 403

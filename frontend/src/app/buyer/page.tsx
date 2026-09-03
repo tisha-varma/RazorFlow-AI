@@ -4,14 +4,14 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { ChatPanel } from "@/components/chat/ChatPanel";
 import { CommercePanel } from "@/components/commerce/CommercePanel";
+import { PolicyPanel } from "@/components/commerce/PolicyPanel";
 import { AuditTrail } from "@/components/audit/AuditTrail";
 import { SessionLimitBar } from "@/components/commerce/SessionLimitBar";
-import { DemoControls } from "@/components/demo/DemoControls";
 import { Product, Cart } from "@/lib/types";
 import { fetchJson } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, ShieldCheck, Activity } from "lucide-react";
+import { ArrowLeft, ShieldCheck, Activity, Settings2, RotateCcw } from "lucide-react";
 
 export default function BuyerPage() {
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -23,6 +23,8 @@ export default function BuyerPage() {
   const [approvalToken, setApprovalToken] = useState<string | null>(null);
   const [approvedId, setApprovedId] = useState<number | null>(null);
   const [showAudit, setShowAudit] = useState(false);
+  const [showPolicy, setShowPolicy] = useState(false);
+  const [policyVersion, setPolicyVersion] = useState(0);
   const [recovery, setRecovery] = useState<null | { kind: "failed" | "stale" }>(null);
   const chatRef = useRef<{ sendMessage: (msg: string) => void } | null>(null);
   const cartRef = useRef<Cart | null>(null);
@@ -187,6 +189,23 @@ export default function BuyerPage() {
     }
   }, []);
 
+  // Fresh budget, fresh thread: spending limits are per-session, so a new
+  // session restores the full ₹10,000. Old session rows are cleaned up
+  // best-effort (demo endpoint); the reload mints the new session.
+  const handleNewSession = useCallback(async () => {
+    if (sessionId) {
+      try {
+        await fetchJson(`/demo/reset?session_id=${encodeURIComponent(sessionId)}`, {
+          method: "POST",
+        });
+      } catch {
+        /* cleanup is a bonus — the new session is what resets budget */
+      }
+    }
+    localStorage.removeItem("razorflow_session_id");
+    window.location.reload();
+  }, [sessionId]);
+
   const handlePaid = useCallback((order: { order_id: number; order_number: string; total_paise: number }) => {
     setApprovedId(null);
     setCart(null);
@@ -196,30 +215,6 @@ export default function BuyerPage() {
       );
     }
   }, []);
-
-  const handleDemoResult = useCallback(async (result: Record<string, unknown>) => {
-    // Reset: wipe all local commerce state for a clean restart.
-    if (typeof result.scope === "string") {
-      setCart(null);
-      setProducts([]);
-      setUpsellProducts([]);
-      setApprovalId(null);
-      setApprovedId(null);
-      return;
-    }
-    // Triggers: refresh the cart view; upsell scenarios also set candidates.
-    const cartId = result.cart_id;
-    if (typeof cartId === "number") {
-      await fetchCart(cartId);
-    }
-    if (Array.isArray(result.upsell)) {
-      setUpsellProducts(result.upsell as Product[]);
-    }
-    if (result.status === "paid" || result.status === "failed") {
-      setApprovalId(null);
-      setApprovedId(null);
-    }
-  }, [fetchCart]);
 
   // Products already in the cart are hidden from discovery lists —
   // the panel shows what you can still add, latest recommendations first.
@@ -236,28 +231,36 @@ export default function BuyerPage() {
   }
 
   return (
-    <div className="h-screen bg-stone-100 text-slate-900 flex flex-col">
-      <header className="border-b border-slate-200 bg-white px-4 py-3 flex items-center gap-3 z-50 shadow-sm">
+    <div className="relative h-screen text-slate-900 flex flex-col bg-stone-100">
+      {/* Ambient mesh backdrop */}
+      <div className="pointer-events-none absolute inset-0" aria-hidden="true">
+        <div className="absolute -top-32 left-1/4 h-72 w-72 rounded-full bg-indigo-300/20 blur-[100px]" />
+        <div className="absolute bottom-0 right-1/4 h-72 w-72 rounded-full bg-violet-300/20 blur-[100px]" />
+      </div>
+      <header className="relative border-b border-slate-200/80 bg-white/85 backdrop-blur-md px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-2 z-50 shadow-[0_1px_12px_rgba(15,23,42,0.06)]">
         <Link href="/">
-          <Button variant="ghost" size="sm" className="text-slate-500 hover:text-slate-900">
+          <Button variant="ghost" size="sm" className="rounded-full text-slate-500 hover:text-slate-900 hover:bg-slate-100">
             <ArrowLeft className="h-4 w-4 mr-1" aria-hidden="true" />
             Back
           </Button>
         </Link>
 
         <div className="flex items-center gap-2">
-          <div className="h-7 w-7 rounded-lg bg-indigo-600 flex items-center justify-center text-xs font-bold text-white">
+          <div className="h-8 w-8 rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 flex items-center justify-center text-xs font-bold text-white shadow-[0_4px_12px_-2px_rgba(79,70,229,0.5)]">
             R
           </div>
-          <span className="font-semibold text-[15px] text-slate-900">RazorFlow AI</span>
+          <div className="leading-tight">
+            <span className="font-semibold text-[15px] text-slate-900">RazorFlow AI</span>
+            <p className="text-[10px] font-medium uppercase tracking-widest text-slate-400">AI Buyer</p>
+          </div>
         </div>
 
-        <Badge variant="outline" className="border-slate-300 text-slate-600 bg-slate-50 text-xs">
+        <Badge variant="outline" className="border-slate-300 text-slate-600 bg-slate-50 text-xs rounded-full">
           Test Mode
         </Badge>
 
         {policyActive && (
-          <Badge variant="outline" className="border-emerald-300 text-emerald-700 bg-emerald-50 text-xs gap-1">
+          <Badge variant="outline" className="border-emerald-300 text-emerald-700 bg-emerald-50 text-xs gap-1 rounded-full shadow-sm">
             <ShieldCheck className="h-3 w-3" aria-hidden="true" />
             Policy Active
           </Badge>
@@ -274,14 +277,35 @@ export default function BuyerPage() {
           Audit trail
         </Button>
 
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setShowPolicy((v) => !v)}
+          aria-expanded={showPolicy}
+          className={showPolicy ? "text-indigo-700 bg-indigo-50" : "text-slate-500 hover:text-slate-900"}
+        >
+          <Settings2 className="h-4 w-4 mr-1" aria-hidden="true" />
+          Policy settings
+        </Button>
+
         <div className="ml-auto flex items-center gap-3">
           <SessionLimitBar
             sessionId={sessionId}
-            refreshKey={`${cart?.id ?? 0}-${approvalId ?? 0}-${approvedId ?? 0}`}
+            refreshKey={`${cart?.id ?? 0}-${approvalId ?? 0}-${approvedId ?? 0}-${policyVersion}`}
           />
-          <span className="text-xs text-slate-400 font-mono tabular-nums">
+          <span className="hidden sm:inline text-xs text-slate-400 font-mono tabular-nums">
             {sessionId.slice(0, 8)}…
           </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleNewSession}
+            title="Start a fresh session — restores the full spending limit"
+            className="rounded-full text-slate-500 hover:text-slate-900 hover:bg-slate-100"
+          >
+            <RotateCcw className="h-3.5 w-3.5 mr-1" aria-hidden="true" />
+            Reset
+          </Button>
         </div>
       </header>
 
@@ -334,7 +358,12 @@ export default function BuyerPage() {
         </div>
       )}
 
-      <DemoControls sessionId={sessionId} onDone={handleDemoResult} />
+      {showPolicy && (
+        <PolicyPanel
+          sessionId={sessionId}
+          onChanged={() => setPolicyVersion((v) => v + 1)}
+        />
+      )}
 
       {showAudit && (
         <div className="h-72 shrink-0 overflow-hidden border-b border-slate-200 bg-white px-4 py-3 shadow-sm">
@@ -345,8 +374,8 @@ export default function BuyerPage() {
         </div>
       )}
 
-      <div className="flex-1 flex overflow-hidden">
-        <div className="w-1/2 min-w-0">
+      <div className="relative flex-1 flex flex-col md:flex-row overflow-hidden gap-3 p-3 min-h-0">
+        <div className="min-h-0 flex-1 md:w-1/2 w-full rounded-2xl overflow-hidden border border-slate-200/80 shadow-[0_8px_24px_-12px_rgba(15,23,42,0.2)]">
           <ChatPanel
             ref={chatRef}
             sessionId={sessionId}
@@ -356,7 +385,7 @@ export default function BuyerPage() {
             onApprovalNeeded={handleApprovalNeeded}
           />
         </div>
-        <div className="w-1/2 min-w-0">
+        <div className="min-h-0 flex-1 md:w-1/2 w-full rounded-2xl overflow-hidden border border-slate-200/80 shadow-[0_8px_24px_-12px_rgba(15,23,42,0.2)]">
           <CommercePanel
             products={visibleProducts}
             cart={cart}

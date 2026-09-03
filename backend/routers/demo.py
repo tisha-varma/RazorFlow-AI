@@ -258,23 +258,39 @@ def _drive_flow(db: Session, session_id: str, fail_payment: bool = False) -> dic
             "status": "failed", "session_id": session_id,
             "order_id": order.id, "order_number": order.order_number,
             "reason": reason, "duration_ms": int((time.time() - started) * 1000),
-            "steps": log
+            "steps": log,
+            # Honest signpost: this trigger seeds a synthetic failure row for
+            # stage reliability. The REAL gateway failure path (decline card
+            # -> payment.failed webhook -> PAYMENT_FAILED -> retry on the same
+            # approval) is exercised live in the buyer UI with test card
+            # 4100 2800 0006 0003 - see README "Failure path".
+            "real_failure_demo": (
+                "Pay in the buyer UI with test card 4100 2800 0006 0003: "
+                "Razorpay emits payment.failed, the webhook marks the order "
+                "failed, and Retry re-uses the same approval."
+            ),
         }
 
     pay_id = f"pay_demo_{uuid.uuid4().hex[:8]}"
     _mark_order_paid(db, order, payment, pay_id, method="card", actor="system")
-    # One PAYMENT_SUCCESS event only: flag the synthesized capture honestly
-    # on the existing row instead of logging a duplicate.
-    existing = db.query(AuditEvent).filter(
-        AuditEvent.event_type == "PAYMENT_SUCCESS",
-        AuditEvent.related_entity_id == order.id
-    ).order_by(AuditEvent.id.desc()).first()
-    if existing:
-        existing.event_data = {
-            **(existing.event_data or {}),
+    # Flag the synthesized capture honestly as its OWN event. Mutating the
+    # PAYMENT_SUCCESS row's event_data post-hoc would invalidate its chain
+    # hash and break /audit/verify — this appends instead.
+    from backend.services.audit_service import AuditService
+    AuditService.log_event(
+        db=db,
+        event_type="DEMO_SIMULATED_CAPTURE",
+        actor="system",
+        merchant_id=order.merchant_id,
+        session_id=session_id,
+        event_data={
+            "order_id": order.id,
+            "order_number": order.order_number,
             "simulated": True, "source": "demo-trigger"
-        }
-        db.commit()
+        },
+        related_entity_type="order",
+        related_entity_id=order.id
+    )
     log.append(f"payment: captured {pay_id} (simulated capture)")
     return {
         "status": "paid", "session_id": session_id,
@@ -283,6 +299,17 @@ def _drive_flow(db: Session, session_id: str, fail_payment: bool = False) -> dic
         "total_paise": totals["total_paise"], "simulated_capture": True,
         "duration_ms": int((time.time() - started) * 1000), "steps": log
     }
+
+
+@router.post("/seed-history")
+def seed_history(count: int = 24):
+    """(Re)seed deterministic HIST-* demo history so the merchant dashboard
+    always has volume to show. Idempotent — clears prior HIST- rows first.
+    DEMO_MODE-gated like every other demo route."""
+    _require_demo()
+    from backend.seed_demo_history import run_seed
+    seeded = run_seed(max(1, min(count, 100)))
+    return {"ok": True, "seeded": seeded}
 
 
 @router.post("/run-successful-purchase")

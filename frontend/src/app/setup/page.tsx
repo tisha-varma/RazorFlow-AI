@@ -10,21 +10,23 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { fetchJson } from "@/lib/api";
 
 export default function SetupPolicy() {
   const router = useRouter();
-  
+
   // Loading states
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
-  
+
   // Policy ID if policy already exists
   const [policyId, setPolicyId] = useState<number | null>(null);
 
   // Form states (converted to UI input values in Rupees)
   const [maxTxn, setMaxTxn] = useState("5000");
+  const [minTxn, setMinTxn] = useState("0");
   const [requireApproval, setRequireApproval] = useState(true);
   const [maxQty, setMaxQty] = useState("5");
   const [allowUpsell, setAllowUpsell] = useState(true);
@@ -34,32 +36,27 @@ export default function SetupPolicy() {
 
   useEffect(() => {
     // Fetch policy to check if already exists
-    fetch("http://localhost:8000/api/policy")
-      .then((res) => {
-        if (res.ok) {
-          return res.json();
-        }
-        if (res.status === 404) {
-          // Normal first-run scenario
-          setLoading(false);
-          return null;
-        }
-        throw new Error("Failed to fetch existing policy settings");
-      })
+    fetchJson("/policy")
       .then((data) => {
-        if (data) {
-          setPolicyId(data.id);
-          setMaxTxn((data.max_transaction_amount_paise / 100).toString());
-          setRequireApproval(data.require_approval);
-          setMaxQty(data.max_quantity_per_item.toString());
-          setAllowUpsell(data.allow_upsell);
-          setMaxUpsell((data.max_upsell_amount_paise / 100).toString());
-          setAllowRetry(data.allow_auto_retry);
-          setSpendingLimit((data.spending_limit_paise / 100).toString());
-          setLoading(false);
-        }
+        setPolicyId(data.id);
+        setMaxTxn((data.max_transaction_amount_paise / 100).toString());
+        setMinTxn(((data.min_transaction_amount_paise ?? 0) / 100).toString());
+        setRequireApproval(data.require_approval);
+        setMaxQty(data.max_quantity_per_item.toString());
+        setAllowUpsell(data.allow_upsell);
+        setMaxUpsell((data.max_upsell_amount_paise / 100).toString());
+        setAllowRetry(data.allow_auto_retry);
+        setSpendingLimit((data.spending_limit_paise / 100).toString());
+        setLoading(false);
       })
       .catch((err) => {
+        // Normal first-run scenario: backend 404s with "No active commerce
+        // policy..." — show the blank form instead of an error.
+        const msg = String(err.message || "");
+        if (msg.includes("404") || msg.includes("No active commerce policy")) {
+          setLoading(false);
+          return;
+        }
         setError(err.message);
         setLoading(false);
       });
@@ -73,12 +70,18 @@ export default function SetupPolicy() {
 
     // Validate inputs
     const txnAmount = parseFloat(maxTxn);
+    const minAmount = parseFloat(minTxn);
     const qtyAmount = parseInt(maxQty);
     const upsellAmount = parseFloat(maxUpsell);
     const limitAmount = parseFloat(spendingLimit);
 
     if (isNaN(txnAmount) || txnAmount <= 0 || txnAmount > 100000) {
       setError("Max transaction amount must be between ₹1 and ₹100,000");
+      setSaving(false);
+      return;
+    }
+    if (isNaN(minAmount) || minAmount < 0 || minAmount >= txnAmount) {
+      setError("Min transaction amount must be ₹0 or more and below the max transaction amount");
       setSaving(false);
       return;
     }
@@ -101,6 +104,7 @@ export default function SetupPolicy() {
     // Prepare payload in paise
     const payload = {
       max_transaction_amount_paise: Math.round(txnAmount * 100),
+      min_transaction_amount_paise: Math.round(minAmount * 100),
       require_approval: requireApproval,
       max_quantity_per_item: qtyAmount,
       allow_upsell: allowUpsell,
@@ -110,26 +114,18 @@ export default function SetupPolicy() {
     };
 
     try {
-      const url = policyId 
-        ? `http://localhost:8000/api/policy/${policyId}`
-        : "http://localhost:8000/api/policy?merchant_id=1";
-        
+      const endpoint = policyId ? `/policy/${policyId}` : "/policy?merchant_id=1";
       const method = policyId ? "PUT" : "POST";
 
-      const res = await fetch(url, {
+      const data = await fetchJson(endpoint, {
         method,
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-
-      if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.detail || "Failed to save policy settings");
-      }
+      if (!policyId && data?.id) setPolicyId(data.id);
 
       setSuccess(true);
       setTimeout(() => {
-        router.push("/");
+        router.push("/buyer");
       }, 1500);
     } catch (err: any) {
       setError(err.message || "Failed to submit policy configuration");
@@ -140,48 +136,51 @@ export default function SetupPolicy() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-slate-100">
-        <RefreshCw className="h-8 w-8 animate-spin text-blue-500 mb-4" />
-        <p className="text-slate-400 text-sm">Loading policy settings...</p>
+      <div className="min-h-screen bg-stone-100 flex flex-col items-center justify-center text-slate-900">
+        <RefreshCw className="h-8 w-8 animate-spin text-indigo-500 mb-4" />
+        <p className="text-slate-500 text-sm">Loading policy settings...</p>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 py-12 px-6 flex flex-col justify-center items-center relative overflow-hidden">
-      <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-blue-600/5 blur-[120px] pointer-events-none" />
-      <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-violet-600/5 blur-[120px] pointer-events-none" />
+    <div className="relative min-h-screen bg-stone-100 text-slate-900 py-12 px-6 flex flex-col justify-center items-center overflow-hidden">
+      <div className="pointer-events-none absolute inset-0" aria-hidden="true">
+        <div className="absolute -top-24 left-1/4 h-72 w-72 rounded-full bg-indigo-300/20 blur-[100px]" />
+        <div className="absolute bottom-0 right-1/4 h-72 w-72 rounded-full bg-emerald-300/20 blur-[100px]" />
+      </div>
 
       <div className="w-full max-w-xl relative z-10">
-        <Button 
-          variant="ghost" 
+        <Button
+          variant="ghost"
           onClick={() => router.push("/")}
-          className="mb-6 text-slate-400 hover:text-white"
+          className="mb-6 rounded-full text-slate-500 hover:text-slate-900 hover:bg-white"
         >
           <ArrowLeft className="mr-2 h-4 w-4" />
           Back to Home
         </Button>
 
         <form onSubmit={handleSubmit}>
-          <Card className="bg-slate-900/40 border-slate-800 backdrop-blur-md">
-            <CardHeader className="border-b border-slate-800/80 pb-6">
+          <Card className="bg-white border-slate-200/80 shadow-[0_16px_40px_-16px_rgba(15,23,42,0.25)] overflow-hidden">
+            <div className="h-1 bg-gradient-to-r from-indigo-500 via-violet-500 to-emerald-500" aria-hidden="true" />
+            <CardHeader className="border-b border-slate-100 pb-6">
               <div className="flex justify-between items-center">
-                <div className="h-10 w-10 rounded-lg bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400">
-                  <ShieldCheck className="h-5 w-5" />
+                <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-[0_4px_12px_-2px_rgba(79,70,229,0.5)]">
+                  <ShieldCheck className="h-5 w-5 text-white" />
                 </div>
-                <Badge variant="outline" className="border-blue-500/30 text-blue-400 bg-blue-950/20 text-xs">
+                <Badge variant="outline" className="rounded-full border-emerald-300 text-emerald-700 bg-emerald-50 text-xs">
                   {policyId ? "Policy Active" : "First-Run Setup"}
                 </Badge>
               </div>
-              <CardTitle className="text-2xl font-bold mt-4 text-white">Commerce Policy Configuration</CardTitle>
-              <CardDescription className="text-slate-400">
+              <CardTitle className="text-2xl font-bold mt-4 text-slate-900">Commerce Policy Configuration</CardTitle>
+              <CardDescription className="text-slate-500">
                 Setup the spending limits and rules. Every money action will be checked against this configuration by the Policy Engine.
               </CardDescription>
             </CardHeader>
 
             <CardContent className="space-y-6 pt-6">
               {error && (
-                <Alert variant="destructive" className="bg-red-950/20 border-red-500/30 text-red-400">
+                <Alert variant="destructive" className="bg-red-50 border-red-300 text-red-700">
                   <AlertCircle className="h-4 w-4" />
                   <AlertTitle>Error</AlertTitle>
                   <AlertDescription>{error}</AlertDescription>
@@ -189,22 +188,22 @@ export default function SetupPolicy() {
               )}
 
               {success && (
-                <Alert className="bg-emerald-950/20 border-emerald-500/30 text-emerald-400">
-                  <ShieldCheck className="h-4 w-4 text-emerald-400" />
+                <Alert className="bg-emerald-50 border-emerald-300 text-emerald-700">
+                  <ShieldCheck className="h-4 w-4 text-emerald-600" />
                   <AlertTitle>Success</AlertTitle>
-                  <AlertDescription>Commerce Policy settings updated. Redirecting...</AlertDescription>
+                  <AlertDescription>Commerce Policy settings updated. Taking you to the buyer…</AlertDescription>
                 </Alert>
               )}
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="maxTxn" className="text-slate-200">Max Transaction (₹)</Label>
-                  <Input 
-                    id="maxTxn" 
+                  <Label htmlFor="maxTxn" className="text-slate-700">Max Transaction (₹)</Label>
+                  <Input
+                    id="maxTxn"
                     type="number"
                     value={maxTxn}
                     onChange={(e) => setMaxTxn(e.target.value)}
-                    className="bg-slate-950 border-slate-800 focus-visible:ring-blue-500 text-slate-100" 
+                    className="bg-white border-slate-300 focus-visible:ring-indigo-500 text-slate-900"
                     placeholder="5000"
                     required
                   />
@@ -212,108 +211,122 @@ export default function SetupPolicy() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="spendingLimit" className="text-slate-200">Session Limit (₹)</Label>
-                  <Input 
-                    id="spendingLimit" 
+                  <Label htmlFor="minTxn" className="text-slate-700">Min Transaction (₹)</Label>
+                  <Input
+                    id="minTxn"
                     type="number"
-                    value={spendingLimit}
-                    onChange={(e) => setSpendingLimit(e.target.value)}
-                    className="bg-slate-950 border-slate-800 focus-visible:ring-blue-500 text-slate-100" 
-                    placeholder="10000"
+                    value={minTxn}
+                    onChange={(e) => setMinTxn(e.target.value)}
+                    className="bg-white border-slate-300 focus-visible:ring-indigo-500 text-slate-900"
+                    placeholder="0"
                     required
                   />
-                  <p className="text-[10px] text-slate-500">Total allowed per chat session.</p>
+                  <p className="text-[10px] text-slate-500">Floor per transaction — 0 disables it.</p>
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="maxQty" className="text-slate-200">Max Item Quantity</Label>
-                  <Input 
-                    id="maxQty" 
+                  <Label htmlFor="spendingLimit" className="text-slate-700">Session Limit (₹)</Label>
+                  <Input
+                    id="spendingLimit"
+                    type="number"
+                    value={spendingLimit}
+                    onChange={(e) => setSpendingLimit(e.target.value)}
+                    className="bg-white border-slate-300 focus-visible:ring-indigo-500 text-slate-900"
+                    placeholder="10000"
+                    required
+                  />
+                  <p className="text-[10px] text-slate-500">Total allowed per chat session.</p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="maxQty" className="text-slate-700">Max Item Quantity</Label>
+                  <Input
+                    id="maxQty"
                     type="number"
                     value={maxQty}
                     onChange={(e) => setMaxQty(e.target.value)}
-                    className="bg-slate-950 border-slate-800 focus-visible:ring-blue-500 text-slate-100" 
+                    className="bg-white border-slate-300 focus-visible:ring-indigo-500 text-slate-900"
                     placeholder="5"
                     required
                   />
                   <p className="text-[10px] text-slate-500">Max units of a single product.</p>
                 </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="maxUpsell" className="text-slate-200">Max Upsell Total (₹)</Label>
-                  <Input 
-                    id="maxUpsell" 
-                    type="number"
-                    disabled={!allowUpsell}
-                    value={maxUpsell}
-                    onChange={(e) => setMaxUpsell(e.target.value)}
-                    className="bg-slate-950 border-slate-800 focus-visible:ring-blue-500 text-slate-100 disabled:opacity-50" 
-                    placeholder="2000"
-                    required={allowUpsell}
-                  />
-                  <p className="text-[10px] text-slate-500">Limit on cross-sell items.</p>
-                </div>
               </div>
 
-              <div className="border-t border-slate-800/80 my-4" />
+              <div className="space-y-2">
+                <Label htmlFor="maxUpsell" className="text-slate-700">Max Upsell Total (₹)</Label>
+                <Input
+                  id="maxUpsell"
+                  type="number"
+                  disabled={!allowUpsell}
+                  value={maxUpsell}
+                  onChange={(e) => setMaxUpsell(e.target.value)}
+                  className="bg-white border-slate-300 focus-visible:ring-indigo-500 text-slate-900 disabled:opacity-50"
+                  placeholder="2000"
+                  required={allowUpsell}
+                />
+                <p className="text-[10px] text-slate-500">Limit on cross-sell items.</p>
+              </div>
+
+              <div className="border-t border-slate-100 my-4" />
 
               {/* Switches */}
               <div className="space-y-4">
-                <div className="flex items-center justify-between p-3 rounded-lg bg-slate-950/30 border border-slate-800/50">
+                <div className="flex items-center justify-between p-3 rounded-xl bg-stone-50 border border-slate-200">
                   <div className="space-y-0.5">
-                    <Label htmlFor="requireApproval" className="text-slate-200 text-sm">Require Payment Approval</Label>
+                    <Label htmlFor="requireApproval" className="text-slate-800 text-sm">Require Payment Approval</Label>
                     <p className="text-xs text-slate-500">Payment must be explicitly approved by user before checkout.</p>
                   </div>
-                  <Switch 
-                    id="requireApproval" 
-                    checked={requireApproval} 
+                  <Switch
+                    id="requireApproval"
+                    checked={requireApproval}
                     onCheckedChange={setRequireApproval}
                     disabled={true} // Hard lock recommended by problem statement
                   />
                 </div>
 
-                <div className="flex items-center justify-between p-3 rounded-lg bg-slate-950/30 border border-slate-800/50">
+                <div className="flex items-center justify-between p-3 rounded-xl bg-stone-50 border border-slate-200">
                   <div className="space-y-0.5">
-                    <Label htmlFor="allowUpsell" className="text-slate-200 text-sm">Enable AI Upsell Recommendations</Label>
+                    <Label htmlFor="allowUpsell" className="text-slate-800 text-sm">Enable AI Upsell Recommendations</Label>
                     <p className="text-xs text-slate-500">Allow the AI to recommend logical accessories.</p>
                   </div>
-                  <Switch 
-                    id="allowUpsell" 
-                    checked={allowUpsell} 
-                    onCheckedChange={setAllowUpsell} 
+                  <Switch
+                    id="allowUpsell"
+                    checked={allowUpsell}
+                    onCheckedChange={setAllowUpsell}
                   />
                 </div>
 
-                <div className="flex items-center justify-between p-3 rounded-lg bg-slate-950/30 border border-slate-800/50">
+                <div className="flex items-center justify-between p-3 rounded-xl bg-stone-50 border border-slate-200">
                   <div className="space-y-0.5">
-                    <Label htmlFor="allowRetry" className="text-slate-200 text-sm">Automatic Retry on Failure</Label>
+                    <Label htmlFor="allowRetry" className="text-slate-800 text-sm">Automatic Retry on Failure</Label>
                     <p className="text-xs text-slate-500">Try checking out again automatically on transient failures.</p>
                   </div>
-                  <Switch 
-                    id="allowRetry" 
-                    checked={allowRetry} 
-                    onCheckedChange={setAllowRetry} 
+                  <Switch
+                    id="allowRetry"
+                    checked={allowRetry}
+                    onCheckedChange={setAllowRetry}
                   />
                 </div>
               </div>
             </CardContent>
 
-            <CardFooter className="border-t border-slate-800/80 pt-6 flex justify-end gap-3">
-              <Button 
-                type="button" 
-                variant="outline" 
+            <CardFooter className="border-t border-slate-100 pt-6 flex justify-end gap-3">
+              <Button
+                type="button"
+                variant="outline"
                 onClick={() => router.push("/")}
                 disabled={saving}
-                className="border-slate-800 text-slate-400 hover:text-white"
+                className="rounded-full"
               >
                 Cancel
               </Button>
-              <Button 
-                type="submit" 
+              <Button
+                type="submit"
                 disabled={saving}
-                className="bg-blue-600 hover:bg-blue-500 text-white font-semibold"
+                className="rounded-full bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-semibold shadow-md"
               >
                 <Save className="mr-2 h-4 w-4" />
                 {saving ? "Saving Configuration..." : "Save Policy Config"}

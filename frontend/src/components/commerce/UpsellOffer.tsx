@@ -17,17 +17,22 @@ export function UpsellOffer({ products, onAddToCart }: UpsellOfferProps) {
   }
 
   return (
-    <div className="bg-amber-50 rounded-xl border border-amber-200 shadow-sm overflow-hidden">
-      <div className="px-4 py-3 border-b border-amber-200 bg-amber-100/60 flex items-center gap-2">
-        <Sparkles className="h-4 w-4 text-amber-600" aria-hidden="true" />
-        <span className="text-sm font-semibold text-amber-900">
-          You might also like
+    <div className="rounded-2xl border border-amber-200/80 bg-gradient-to-br from-amber-50 to-orange-50/60 shadow-[0_8px_24px_-12px_rgba(217,119,6,0.35)] overflow-hidden">
+      <div className="px-4 py-3 border-b border-amber-200/70 flex items-center gap-2">
+        <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-gradient-to-br from-amber-500 to-orange-500 shadow-sm" aria-hidden="true">
+          <Sparkles className="h-3.5 w-3.5 text-white" />
         </span>
+        <span className="text-sm font-semibold text-amber-900">
+          Pairs well with your picks
+        </span>
+        <Badge variant="outline" className="ml-auto border-amber-300 bg-white/70 text-[10px] font-bold uppercase tracking-wide text-amber-700">
+          Upsell
+        </Badge>
       </div>
 
-      <div className="divide-y divide-amber-200/70">
+      <div className="divide-y divide-amber-200/60">
         {products.map((product) => (
-          <div key={product.id} className="px-4 py-3 flex items-center gap-3">
+          <div key={product.id} className="px-4 py-3 flex items-center gap-3 transition-colors hover:bg-white/60">
             <ProductImage
               src={product.image_url}
               alt={product.name}

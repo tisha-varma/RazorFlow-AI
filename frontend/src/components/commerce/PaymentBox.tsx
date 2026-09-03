@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { CreditCard, Loader2, CheckCircle2, XCircle } from "lucide-react";
@@ -21,7 +21,10 @@ interface PaymentBoxProps {
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
 
-type Phase = "idle" | "creating" | "checkout" | "verifying" | "success" | "failed";
+type Phase = "idle" | "creating" | "checkout" | "verifying" | "processing" | "success" | "failed";
+
+const POLL_INTERVAL_MS = 2000;
+const POLL_MAX_TRIES = 15; // ~30s window, then honest "processing" copy
 
 let checkoutJsPromise: Promise<void> | null = null;
 function loadCheckoutJs(): Promise<void> {
@@ -49,6 +52,66 @@ export function PaymentBox({ approvalId, sessionId, onPaid }: PaymentBoxProps) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
   const [paidOrder, setPaidOrder] = useState<PaidOrder | null>(null);
+  const [rzrOrderId, setRzrOrderId] = useState<string | null>(null);
+  const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (pollTimer.current) clearTimeout(pollTimer.current);
+    };
+  }, []);
+
+  const fetchStatus = async (orderId: string) => {
+    const res = await fetch(
+      `${API_BASE}/payment/status/${encodeURIComponent(orderId)}?session_id=${encodeURIComponent(sessionId)}`
+    );
+    if (!res.ok) throw new Error("Status check failed");
+    return res.json() as Promise<{
+      status: string;
+      order_id: number;
+      order_number: string;
+      total_paise: number;
+      verified: boolean;
+      razorpay_payment_id?: string | null;
+    }>;
+  };
+
+  // Ambiguous-outcome poll: money may have moved at Razorpay while the
+  // browser missed the callback (JS crash, network drop). Every 2s for ~30s;
+  // a paid answer flips to success, otherwise honest "processing" copy.
+  const pollStatus = async (orderId: string, triesLeft: number = POLL_MAX_TRIES) => {
+    setPhase("processing");
+    try {
+      const s = await fetchStatus(orderId);
+      if (s.status === "paid") {
+        const paid: PaidOrder = {
+          order_id: s.order_id,
+          order_number: s.order_number,
+          total_paise: s.total_paise,
+          razorpay_payment_id: s.razorpay_payment_id,
+        };
+        setPaidOrder(paid);
+        setPhase("success");
+        onPaid?.(paid);
+        return;
+      }
+      if (s.status === "failed") {
+        setError("Payment failed at the gateway. You can retry.");
+        setPhase("failed");
+        return;
+      }
+    } catch {
+      // Transient status error — keep polling until the window ends.
+    }
+    if (triesLeft <= 1) {
+      setError(
+        "Payment is still processing — if you were charged, the order will confirm automatically. You can check again."
+      );
+      setPhase("processing");
+      return;
+    }
+    pollTimer.current = setTimeout(() => pollStatus(orderId, triesLeft - 1), POLL_INTERVAL_MS);
+  };
 
   const startPayment = async () => {
     setPhase("creating");
@@ -65,6 +128,7 @@ export function PaymentBox({ approvalId, sessionId, onPaid }: PaymentBoxProps) {
         throw new Error(data.detail || "Could not create payment order");
       }
       const order = await res.json();
+      setRzrOrderId(order.razorpay_order_id);
 
       await loadCheckoutJs();
       setPhase("checkout");
@@ -100,13 +164,26 @@ export function PaymentBox({ approvalId, sessionId, onPaid }: PaymentBoxProps) {
             });
             if (!vres.ok) {
               const data = await vres.json().catch(() => ({}));
-              throw new Error(data.detail || "Payment verification failed");
+              // Definitive rejection (bad signature) = failed. Anything
+              // ambiguous (server/gateway down, network drop) = poll, since
+              // the capture may still land via webhook.
+              if (vres.status === 400) {
+                throw new Error(data.detail || "Payment verification failed");
+              }
+              await pollStatus(response.razorpay_order_id);
+              return;
             }
             const paid: PaidOrder = await vres.json();
             setPaidOrder(paid);
             setPhase("success");
             onPaid?.(paid);
           } catch (e: unknown) {
+            // Fetch itself threw (network down): outcome unknown → poll.
+            const orderId = response.razorpay_order_id;
+            if (e instanceof TypeError && orderId) {
+              await pollStatus(orderId);
+              return;
+            }
             setError(e instanceof Error ? e.message : "Verification failed");
             setPhase("failed");
           }
@@ -165,12 +242,14 @@ export function PaymentBox({ approvalId, sessionId, onPaid }: PaymentBoxProps) {
           <p className="mb-2 text-[13px] text-slate-500">
             Test mode — pay with a Razorpay test card or UPI to complete the order.
           </p>
-          {(phase === "creating" || phase === "verifying") && (
+          {(phase === "creating" || phase === "verifying" || phase === "processing") && (
             <div className="mb-2 flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 p-2.5 text-[13px] text-indigo-800" aria-live="polite">
               <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
               {phase === "creating"
                 ? "Creating secure order on the server…"
-                : "Verifying payment signature on the server…"}
+                : phase === "verifying"
+                  ? "Verifying payment signature on the server…"
+                  : "Confirming with the bank — checking payment status…"}
             </div>
           )}
           {phase === "failed" && (
@@ -182,20 +261,37 @@ export function PaymentBox({ approvalId, sessionId, onPaid }: PaymentBoxProps) {
               </span>
             </div>
           )}
+          {phase === "processing" && error && (
+            <div className="mb-2 flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 p-2.5 text-[13px] text-amber-800" aria-live="polite">
+              <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" />
+              <span>{error}</span>
+            </div>
+          )}
           <Button
             onClick={startPayment}
-            disabled={phase === "creating" || phase === "verifying" || phase === "checkout"}
+            disabled={phase === "creating" || phase === "verifying" || phase === "checkout" || phase === "processing"}
             className="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-[15px] font-semibold h-11 shadow-sm touch-manipulation"
           >
-            {(phase === "creating" || phase === "verifying") && (
+            {(phase === "creating" || phase === "verifying" || phase === "processing") && (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
             )}
             {phase === "failed"
               ? "Retry payment"
               : phase === "checkout"
                 ? "Checkout open — complete payment…"
-                : "Pay securely with Razorpay"}
+                : phase === "processing"
+                  ? "Confirming payment…"
+                  : "Pay securely with Razorpay"}
           </Button>
+          {phase === "processing" && error && rzrOrderId && (
+            <Button
+              variant="outline"
+              onClick={() => pollStatus(rzrOrderId)}
+              className="mt-2 w-full h-10 text-[14px] font-semibold touch-manipulation"
+            >
+              Check again
+            </Button>
+          )}
         </>
       )}
     </div>

@@ -172,6 +172,57 @@ class _FakeLLMClient:
         return self.script[idx]
 
 
+class TestSystemEchoes:
+    @pytest.mark.asyncio
+    async def test_approval_echo_never_claims_paid(self, db_session, seed_data):
+        from backend.services.ai.agent import Agent
+        from backend.services.ai.llm_client import TextResponse
+
+        agent = Agent(_FakeLLMClient([TextResponse(text="I should not be called")]))
+        result = await agent.handle_message(db_session, "echo-sess-1", "Approval completed")
+
+        assert agent.llm_client.calls == 0
+        assert "NOT paid" in result["response"]
+        assert "paid" not in result["response"].lower().replace("not paid", "")
+
+    @pytest.mark.asyncio
+    async def test_reject_echo_acknowledges(self, db_session, seed_data):
+        from backend.services.ai.agent import Agent
+        from backend.services.ai.llm_client import TextResponse
+
+        agent = Agent(_FakeLLMClient([TextResponse(text="I should not be called")]))
+        result = await agent.handle_message(db_session, "echo-sess-2", "I rejected the purchase")
+
+        assert agent.llm_client.calls == 0
+        assert "cancelled" in result["response"].lower()
+        assert "nothing was charged" in result["response"].lower()
+
+    @pytest.mark.asyncio
+    async def test_paid_echo_names_order_without_fabrication(self, db_session, seed_data):
+        from backend.services.ai.agent import Agent
+        from backend.services.ai.llm_client import TextResponse
+
+        agent = Agent(_FakeLLMClient([TextResponse(text="I should not be called")]))
+        result = await agent.handle_message(
+            db_session, "echo-sess-3", "Payment successful for order RF-1-ABC123. What's next?")
+
+        assert agent.llm_client.calls == 0
+        assert "RF-1-ABC123" in result["response"]
+        assert "tracking" not in result["response"].lower()
+        assert "ship" not in result["response"].lower()
+
+    @pytest.mark.asyncio
+    async def test_normal_message_still_uses_llm(self, db_session, seed_data):
+        from backend.services.ai.agent import Agent
+        from backend.services.ai.llm_client import TextResponse
+
+        agent = Agent(_FakeLLMClient([TextResponse(text="Hello shopper")]))
+        result = await agent.handle_message(db_session, "echo-sess-4", "hi there")
+
+        assert agent.llm_client.calls == 1
+        assert result["response"] == "Hello shopper"
+
+
 class TestInitiateCheckoutTool:
     @pytest.mark.asyncio
     async def test_tool_creates_approval_with_token(self, db_session, seed_data):
@@ -790,6 +841,12 @@ class TestAgentPrompts:
         from backend.services.ai.prompts import SYSTEM_PROMPT
         assert "NEVER invent product data" in SYSTEM_PROMPT
         assert "NEVER set or override policy approval" in SYSTEM_PROMPT
+
+    def test_system_prompt_empty_result_framing(self):
+        from backend.services.ai.prompts import SYSTEM_PROMPT
+        assert "Out-of-Scope" in SYSTEM_PROMPT
+        assert "empty list" in SYSTEM_PROMPT
+        assert "do not carry other brands" in SYSTEM_PROMPT
 
 
 class TestStateMachine:

@@ -46,7 +46,11 @@ export function SessionLimitBar({ sessionId, refreshKey }: SessionLimitBarProps)
 
   const pct = Math.min(100, (usage.used_paise / usage.spending_limit_paise) * 100);
   const barColor =
-    pct >= 90 ? "bg-red-500" : pct >= 70 ? "bg-amber-500" : "bg-emerald-500";
+    pct >= 90
+      ? "bg-gradient-to-r from-red-500 to-rose-400 shadow-[0_0_8px_rgba(239,68,68,0.6)]"
+      : pct >= 70
+        ? "bg-gradient-to-r from-amber-500 to-orange-400 shadow-[0_0_8px_rgba(245,158,11,0.5)]"
+        : "bg-gradient-to-r from-emerald-500 to-teal-400 shadow-[0_0_8px_rgba(16,185,129,0.5)]";
 
   return (
     <div

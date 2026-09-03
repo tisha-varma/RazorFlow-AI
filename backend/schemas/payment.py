@@ -36,6 +36,15 @@ class VerifyPaymentResponse(BaseModel):
     razorpay_payment_id: str | None = None
 
 
+class PaymentStatusResponse(BaseModel):
+    status: str  # pending | failed | paid
+    order_id: int
+    order_number: str
+    total_paise: int
+    verified: bool = False
+    razorpay_payment_id: str | None = None
+
+
 class WebhookResult(BaseModel):
     ok: bool = True
     detail: Optional[str] = None

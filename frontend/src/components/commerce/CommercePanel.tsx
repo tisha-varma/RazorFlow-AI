@@ -51,15 +51,20 @@ export function CommercePanel({
   const itemCount = cart?.items?.length || 0;
 
   return (
-    <div className="flex flex-col h-full bg-stone-100">
+    <div className="flex flex-col h-full bg-transparent">
       {/* Header */}
-      <div className="bg-white border-b border-slate-200 px-4 py-3 flex items-center gap-2 shrink-0 shadow-sm">
-        <ShoppingBag className="h-4 w-4 text-indigo-600" aria-hidden="true" />
-        <h2 className="text-[15px] font-semibold text-slate-900">Commerce</h2>
+      <div className="bg-white/90 backdrop-blur-sm border-b border-slate-200/80 px-4 py-3 flex items-center gap-2.5 shrink-0">
+        <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 shadow-[0_4px_12px_-2px_rgba(79,70,229,0.5)]" aria-hidden="true">
+          <ShoppingBag className="h-4 w-4 text-white" />
+        </span>
+        <div className="leading-tight">
+          <h2 className="text-[15px] font-semibold text-slate-900">Commerce</h2>
+          <p className="text-[11px] text-slate-500">Live cart · policy-checked</p>
+        </div>
         {itemCount > 0 && (
           <Badge
             variant="outline"
-            className="text-xs border-indigo-200 text-indigo-700 bg-indigo-50 ml-auto"
+            className="text-xs border-indigo-200 text-indigo-700 bg-indigo-50 ml-auto tabular-nums"
           >
             {itemCount} {itemCount === 1 ? "item" : "items"}
           </Badge>
@@ -125,18 +130,20 @@ export function CommercePanel({
 
           {products.length === 0 && itemCount === 0 && (
             <div className="flex flex-col items-center justify-center py-12 text-center" aria-live="polite">
-              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-indigo-50 mb-3">
-                <Package className="h-6 w-6 text-indigo-400" aria-hidden="true" />
+              <span className="relative mb-4 flex h-16 w-16 items-center justify-center" aria-hidden="true">
+                <span className="absolute inset-0 rounded-2xl bg-gradient-to-br from-indigo-100 to-violet-100" />
+                <span className="absolute inset-0 rounded-2xl bg-gradient-to-br from-indigo-500/10 to-violet-500/10 blur-md" />
+                <Package className="relative h-7 w-7 text-indigo-500" />
               </span>
-              <p className="text-[15px] font-semibold text-slate-700">Waiting for your request…</p>
-              <p className="mt-1 max-w-[240px] text-[13px] leading-relaxed text-slate-500">
-                Ask for anything — shoes, budgets, comparisons. Matching products land here.
+              <p className="text-[15px] font-semibold text-slate-800">Your shelf is empty</p>
+              <p className="mt-1 max-w-[250px] text-[13px] leading-relaxed text-slate-500">
+                Chat on the left — matching products land here with prices and reasons.
               </p>
-              <div className="mt-3 flex flex-wrap justify-center gap-1.5">
+              <div className="mt-4 flex flex-wrap justify-center gap-1.5">
                 {["Marathon shoes", "Trail gear", "Under ₹5,000"].map((hint) => (
                   <span
                     key={hint}
-                    className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] text-slate-500"
+                    className="rounded-full border border-slate-200/80 bg-white/80 px-2.5 py-1 text-[11px] font-medium text-slate-500 shadow-sm"
                   >
                     {hint}
                   </span>

@@ -60,7 +60,7 @@ export default function ApprovalScreen({
   onApprove,
   onReject,
 }: ApprovalScreenProps) {
-  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState<null | "approve" | "reject">(null);
   const [error, setError] = useState<string | null>(null);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [summaryError, setSummaryError] = useState<string | null>(null);
@@ -84,7 +84,7 @@ export default function ApprovalScreen({
   }, [approvalId, sessionId]);
 
   const handleAction = async (action: "approve" | "reject") => {
-    setLoading(true);
+    setBusy(action);
     setError(null);
     try {
       if (!approvalToken) {
@@ -107,21 +107,26 @@ export default function ApprovalScreen({
     } catch (e: any) {
       setError(e.message);
     } finally {
-      setLoading(false);
+      setBusy(null);
     }
   };
 
   const details = summary?.policy_details;
 
   return (
-    <div className="rounded-xl border border-amber-200 bg-amber-50 p-6">
-      <div className="mb-4 flex items-center gap-2">
-        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-amber-500 text-white text-sm font-bold">
+    <div className="overflow-hidden rounded-2xl border border-amber-200/80 bg-gradient-to-br from-amber-50 to-orange-50/60 shadow-[0_8px_24px_-12px_rgba(217,119,6,0.35)]">
+      <div className="h-1 bg-gradient-to-r from-amber-500 to-orange-400" aria-hidden="true" />
+      <div className="p-5">
+      <div className="mb-4 flex items-center gap-2.5">
+        <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 text-sm font-bold text-white shadow-md" aria-hidden="true">
           !
+        </span>
+        <div className="leading-tight">
+          <h3 className="text-[16px] font-semibold text-amber-900">
+            Approval Required
+          </h3>
+          <p className="text-[11px] text-amber-700">Human gate — nothing moves until you decide</p>
         </div>
-        <h3 className="text-lg font-semibold text-amber-900">
-          Approval Required
-        </h3>
       </div>
 
       {/* What am I buying */}
@@ -251,18 +256,19 @@ export default function ApprovalScreen({
       <div className="flex gap-3">
         <button
           onClick={() => handleAction("reject")}
-          disabled={loading}
-          className="flex-1 rounded-lg border border-red-300 bg-white px-4 py-2.5 text-sm font-medium text-red-700 transition-colors hover:bg-red-50 disabled:opacity-50"
+          disabled={busy !== null}
+          className="h-11 flex-1 rounded-xl border border-red-300 bg-white px-4 text-sm font-semibold text-red-700 shadow-sm transition-all hover:bg-red-50 active:scale-[0.99] disabled:opacity-50 touch-manipulation"
         >
-          {loading ? "Processing..." : "Reject"}
+          {busy === "reject" ? "Rejecting…" : "Reject"}
         </button>
         <button
           onClick={() => handleAction("approve")}
-          disabled={loading}
-          className="flex-1 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-emerald-500 disabled:opacity-50 shadow-sm"
+          disabled={busy !== null}
+          className="h-11 flex-1 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-4 text-sm font-semibold text-white shadow-[0_6px_16px_-4px_rgba(5,150,105,0.5)] transition-all hover:from-emerald-500 hover:to-teal-500 active:scale-[0.99] disabled:opacity-50 touch-manipulation"
         >
-          {loading ? "Processing..." : "Approve Purchase"}
+          {busy === "approve" ? "Approving…" : "Approve Purchase"}
         </button>
+      </div>
       </div>
     </div>
   );

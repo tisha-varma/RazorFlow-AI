@@ -121,12 +121,17 @@ export function MessageBubble({ message }: MessageBubbleProps) {
   const isUser = message.role === "user";
 
   return (
-    <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
+    <div className={`flex items-end gap-2 ${isUser ? "justify-end" : "justify-start"}`}>
+      {!isUser && (
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 text-[11px] font-bold text-white shadow-sm" aria-hidden="true">
+          AI
+        </span>
+      )}
       <div
-        className={`max-w-[85%] rounded-2xl px-4 py-3 text-[14px] leading-relaxed shadow-sm ${
+        className={`max-w-[85%] rounded-2xl px-4 py-3 text-[14px] leading-relaxed ${
           isUser
-            ? "bg-indigo-600 text-white rounded-br-md"
-            : "bg-white text-slate-800 rounded-bl-md border border-slate-200"
+            ? "rounded-br-md bg-gradient-to-br from-indigo-600 to-violet-600 text-white shadow-[0_4px_12px_-2px_rgba(79,70,229,0.4)]"
+            : "rounded-bl-md border border-slate-200/80 bg-white text-slate-800 shadow-[0_1px_2px_rgba(15,23,42,0.06)]"
         }`}
       >
         {isUser ? (

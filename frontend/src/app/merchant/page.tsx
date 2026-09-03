@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { AuditTrail } from "@/components/audit/AuditTrail";
 import { ImpactChart } from "@/components/merchant/ImpactChart";
@@ -14,6 +14,8 @@ import {
   TrendingUp,
   Gift,
   Percent,
+  Store,
+  History,
 } from "lucide-react";
 
 interface PeriodStats {
@@ -82,24 +84,27 @@ function StatCard({
   label,
   value,
   sub,
-  accent,
+  tile,
+  bar,
 }: {
   icon: typeof Banknote;
   label: string;
   value: string;
   sub?: string;
-  accent: string;
+  tile: string;
+  bar: string;
 }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="flex items-center gap-2">
-        <span className={`flex h-8 w-8 items-center justify-center rounded-lg ${accent}`}>
+    <div className="group relative overflow-hidden rounded-2xl border border-slate-200/80 bg-white p-4 shadow-[0_8px_24px_-12px_rgba(15,23,42,0.25)] transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_16px_32px_-12px_rgba(15,23,42,0.3)]">
+      <div className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${bar}`} aria-hidden="true" />
+      <div className="flex items-center gap-2.5">
+        <span className={`flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br ${tile} text-white shadow-md`}>
           <Icon className="h-4 w-4" aria-hidden="true" />
         </span>
         <span className="text-[13px] font-medium text-slate-500">{label}</span>
       </div>
-      <p className="mt-2 text-2xl font-bold tabular-nums text-slate-900">{value}</p>
-      {sub && <p className="mt-0.5 text-xs tabular-nums text-slate-500">{sub}</p>}
+      <p className="mt-2.5 bg-gradient-to-br from-slate-900 to-slate-700 bg-clip-text text-[26px] font-extrabold tabular-nums leading-none text-transparent">{value}</p>
+      {sub && <p className="mt-1.5 text-xs tabular-nums text-slate-500">{sub}</p>}
     </div>
   );
 }
@@ -108,23 +113,50 @@ export default function MerchantPage() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [funnel, setFunnel] = useState<FunnelStage[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [seeding, setSeeding] = useState(false);
+  const seededOnce = useRef(false);
+
+  const loadDashboard = useCallback(async () => {
+    const [summaryRes, funnelRes] = await Promise.all([
+      fetch(`${API_BASE}/dashboard/summary?merchant_id=1`),
+      fetch(`${API_BASE}/dashboard/funnel?merchant_id=1`),
+    ]);
+    if (!summaryRes.ok) throw new Error("Could not load dashboard");
+    const data: Summary = await summaryRes.json();
+    setSummary(data);
+    if (funnelRes.ok) {
+      setFunnel((await funnelRes.json()).stages ?? []);
+    }
+    return data;
+  }, []);
 
   const fetchDashboard = useCallback(async () => {
     try {
-      const [summaryRes, funnelRes] = await Promise.all([
-        fetch(`${API_BASE}/dashboard/summary?merchant_id=1`),
-        fetch(`${API_BASE}/dashboard/funnel?merchant_id=1`),
-      ]);
-      if (!summaryRes.ok) throw new Error("Could not load dashboard");
-      setSummary(await summaryRes.json());
-      if (funnelRes.ok) {
-        setFunnel((await funnelRes.json()).stages ?? []);
-      }
+      const data = await loadDashboard();
       setError(null);
+      // Never show an empty dashboard: seed deterministic HIST-* history
+      // once per visit when there are no paid orders (e.g. fresh DB or
+      // after a merchant-wide demo reset). Idempotent server-side.
+      if (!seededOnce.current && data.all_time.order_count === 0) {
+        seededOnce.current = true;
+        setSeeding(true);
+        try {
+          const seedRes = await fetch(`${API_BASE}/demo/seed-history?count=24`, {
+            method: "POST",
+          });
+          if (seedRes.ok) {
+            await loadDashboard();
+          }
+        } catch {
+          /* seed is a bonus — empty state still renders */
+        } finally {
+          setSeeding(false);
+        }
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load dashboard");
     }
-  }, []);
+  }, [loadDashboard]);
 
   useEffect(() => {
     fetchDashboard();
@@ -134,31 +166,57 @@ export default function MerchantPage() {
 
   const all = summary?.all_time;
   const today = summary?.today;
+  const hasDemoData = (summary?.recent_orders ?? []).some((o) =>
+    o.order_number.startsWith("HIST-")
+  );
 
   return (
-    <div className="min-h-screen bg-stone-100 text-slate-900 flex flex-col">
-      <header className="border-b border-slate-200 bg-white px-4 py-3 flex items-center gap-4 shadow-sm">
+    <div className="relative min-h-screen text-slate-900 flex flex-col bg-stone-100">
+      {/* Ambient mesh backdrop */}
+      <div className="pointer-events-none absolute inset-0" aria-hidden="true">
+        <div className="absolute -top-32 right-1/4 h-72 w-72 rounded-full bg-emerald-300/20 blur-[100px]" />
+        <div className="absolute bottom-0 left-1/4 h-72 w-72 rounded-full bg-indigo-300/20 blur-[100px]" />
+      </div>
+
+      <header className="relative border-b border-slate-200/80 bg-white/85 backdrop-blur-md px-4 py-3 flex items-center gap-4 z-50 shadow-[0_1px_12px_rgba(15,23,42,0.06)]">
         <Link href="/">
-          <Button variant="ghost" size="sm" className="text-slate-500 hover:text-slate-900">
+          <Button variant="ghost" size="sm" className="rounded-full text-slate-500 hover:text-slate-900 hover:bg-slate-100">
             <ArrowLeft className="h-4 w-4 mr-1" aria-hidden="true" />
             Back
           </Button>
         </Link>
-        <div className="flex items-center gap-2">
-          <div className="h-7 w-7 rounded-lg bg-emerald-600 flex items-center justify-center text-xs font-bold text-white">
-            M
+        <div className="flex items-center gap-2.5">
+          <div className="h-8 w-8 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-[0_4px_12px_-2px_rgba(5,150,105,0.5)]" aria-hidden="true">
+            <Store className="h-4 w-4 text-white" />
           </div>
-          <h1 className="font-semibold text-[15px] text-slate-900">Merchant Console</h1>
+          <div className="leading-tight">
+            <h1 className="font-semibold text-[15px] text-slate-900">Merchant Console</h1>
+            <p className="text-[10px] font-medium uppercase tracking-widest text-slate-400">SprintGear India</p>
+          </div>
         </div>
-        <span className="ml-auto text-xs text-slate-500">
-          SprintGear India · live
-        </span>
+        <div className="ml-auto flex items-center gap-2">
+          {hasDemoData && (
+            <Badge variant="outline" className="gap-1 rounded-full border-amber-300 bg-amber-50 text-[11px] text-amber-800" title="HIST-* rows are deterministic demo history; live orders appear as RF-*">
+              <History className="h-3 w-3" aria-hidden="true" />
+              Demo history included
+            </Badge>
+          )}
+          <Badge variant="outline" className="gap-1.5 rounded-full border-emerald-300 bg-emerald-50 text-xs text-emerald-700">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" aria-hidden="true" />
+            Live
+          </Badge>
+        </div>
       </header>
 
-      <div className="mx-auto w-full max-w-5xl space-y-4 p-4 md:p-6">
+      <div className="relative mx-auto w-full max-w-5xl space-y-4 p-4 md:p-6">
         {error && (
-          <div className="rounded-xl border border-red-300 bg-red-50 p-3 text-sm text-red-700">
+          <div className="rounded-2xl border border-red-300 bg-red-50 p-3 text-sm text-red-700 shadow-sm">
             {error}
+          </div>
+        )}
+        {seeding && (
+          <div className="rounded-2xl border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-800 shadow-sm" aria-live="polite">
+            Loading demo history so the dashboard never opens empty…
           </div>
         )}
 
@@ -169,28 +227,32 @@ export default function MerchantPage() {
             label="Total revenue"
             value={all ? formatPaise(all.total_revenue_paise) : "—"}
             sub={today ? `Today ${formatPaise(today.total_revenue_paise)}` : undefined}
-            accent="bg-emerald-100 text-emerald-700"
+            tile="from-emerald-500 to-teal-600"
+            bar="from-emerald-500 to-teal-400"
           />
           <StatCard
             icon={Receipt}
             label="Avg order value"
             value={all ? formatPaise(all.avg_order_value_paise) : "—"}
             sub={all ? `${all.order_count} paid orders · ${all.ai_assisted_orders} AI-assisted` : undefined}
-            accent="bg-indigo-100 text-indigo-700"
+            tile="from-indigo-500 to-violet-600"
+            bar="from-indigo-500 to-violet-400"
           />
           <StatCard
             icon={Percent}
             label="AI conversion"
             value={summary ? `${summary.conversion_rate_pct}%` : "—"}
             sub={summary ? `${summary.conversion_sessions} AI sessions (approx)` : undefined}
-            accent="bg-sky-100 text-sky-700"
+            tile="from-sky-500 to-cyan-500"
+            bar="from-sky-500 to-cyan-400"
           />
           <StatCard
             icon={Gift}
             label="Upsell revenue"
             value={all ? formatPaise(all.upsell_revenue_paise) : "—"}
             sub={all ? `${all.upsell_pct}% of revenue` : undefined}
-            accent="bg-amber-100 text-amber-800"
+            tile="from-amber-500 to-orange-500"
+            bar="from-amber-500 to-orange-400"
           />
         </div>
 
@@ -210,7 +272,7 @@ export default function MerchantPage() {
         <FunnelChart stages={funnel} />
 
         {/* Audit trail — full width, recent actions on top */}
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-[0_8px_24px_-12px_rgba(15,23,42,0.2)]">
           <div className="h-[440px]">
             <AuditTrail merchantId={1} />
           </div>
@@ -218,16 +280,21 @@ export default function MerchantPage() {
 
         <div className="grid gap-4">
           {/* Orders table */}
-          <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
-            <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
-              <TrendingUp className="h-4 w-4 text-slate-500" aria-hidden="true" />
+          <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-[0_8px_24px_-12px_rgba(15,23,42,0.2)]">
+            <div className="flex items-center gap-2.5 border-b border-slate-100 bg-gradient-to-r from-white to-slate-50 px-4 py-3">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-slate-600 to-slate-800 shadow-sm" aria-hidden="true">
+                <TrendingUp className="h-3.5 w-3.5 text-white" />
+              </span>
               <h2 className="text-sm font-semibold text-slate-900">Recent orders</h2>
+              <span className="ml-auto rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-slate-600">
+                {(summary?.recent_orders ?? []).length}
+              </span>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full border-collapse text-left">
                 <caption className="sr-only">Recent orders</caption>
                 <thead>
-                  <tr className="border-b border-slate-100 bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                  <tr className="border-b border-slate-100 bg-slate-50/80 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
                     <th scope="col" className="px-4 py-2">Order</th>
                     <th scope="col" className="px-4 py-2">Items</th>
                     <th scope="col" className="px-4 py-2 text-right">Amount</th>
@@ -236,12 +303,16 @@ export default function MerchantPage() {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {(summary?.recent_orders ?? []).map((order) => (
-                    <tr key={order.id} className="align-top hover:bg-slate-50">
+                    <tr key={order.id} className="align-top transition-colors hover:bg-indigo-50/40">
                       <td className="px-4 py-2.5">
-                        <p className="font-mono text-xs font-semibold text-slate-800">
+                        <p className={`inline-block rounded-md px-1.5 py-0.5 font-mono text-xs font-semibold ${
+                          order.order_number.startsWith("HIST-")
+                            ? "bg-amber-50 text-amber-800"
+                            : "bg-emerald-50 text-emerald-800"
+                        }`}>
                           {order.order_number}
                         </p>
-                        <p className="mt-0.5 text-[11px] text-slate-400">
+                        <p className="mt-0.5 text-[11px] tabular-nums text-slate-400">
                           {timeFor(order.created_at)}
                         </p>
                       </td>
@@ -252,7 +323,7 @@ export default function MerchantPage() {
                         {order.is_ai_assisted && (
                           <Badge
                             variant="outline"
-                            className="mt-1 border-indigo-200 bg-indigo-50 text-[10px] text-indigo-700"
+                            className="mt-1 border-indigo-200 bg-indigo-50 text-[10px] text-indigo-700 rounded-full"
                           >
                             AI-assisted
                           </Badge>
@@ -264,7 +335,7 @@ export default function MerchantPage() {
                       <td className="px-4 py-2.5">
                         <Badge
                           variant="outline"
-                          className={`text-[11px] ${STATUS_STYLES[order.status] ?? STATUS_STYLES.cancelled}`}
+                          className={`rounded-full text-[11px] ${STATUS_STYLES[order.status] ?? STATUS_STYLES.cancelled}`}
                         >
                           {order.status}
                         </Badge>
