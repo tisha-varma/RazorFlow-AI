@@ -22,6 +22,11 @@ export function ProductCard({ product, onAddToCart }: ProductCardProps) {
             <Package className="h-4 w-4 text-slate-400 shrink-0" />
             <h4 className="text-sm font-medium text-white truncate">{product.name}</h4>
           </div>
+          {product.reason && (
+            <p className="text-xs italic text-violet-300/90 mb-1">
+              Why this fits: {product.reason}
+            </p>
+          )}
           <p className="text-xs text-slate-400 line-clamp-2 mb-2">{product.description}</p>
           <div className="flex items-center gap-2">
             <Badge variant="outline" className="text-[10px] border-slate-600 text-slate-400">

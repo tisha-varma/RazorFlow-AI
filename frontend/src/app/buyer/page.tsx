@@ -17,6 +17,7 @@ export default function BuyerPage() {
   const [cart, setCart] = useState<Cart | null>(null);
   const [policyActive, setPolicyActive] = useState(false);
   const [approvalId, setApprovalId] = useState<number | null>(null);
+  const [approvedId, setApprovedId] = useState<number | null>(null);
   const chatRef = useRef<{ sendMessage: (msg: string) => void } | null>(null);
   const cartRef = useRef<Cart | null>(null);
 
@@ -24,6 +25,17 @@ export default function BuyerPage() {
   useEffect(() => {
     cartRef.current = cart;
   }, [cart]);
+
+  const fetchCart = useCallback(async (cartId: number) => {
+    try {
+      const cartData = await fetchJson(`/cart/${cartId}`);
+      setCart(cartData);
+      return cartData;
+    } catch (e) {
+      console.error("Failed to fetch cart:", e);
+      return null;
+    }
+  }, []);
 
   useEffect(() => {
     const savedSession = localStorage.getItem("razorflow_session_id");
@@ -52,17 +64,6 @@ export default function BuyerPage() {
       .then(() => setPolicyActive(true))
       .catch(() => setPolicyActive(false));
   }, [fetchCart]);
-
-  const fetchCart = useCallback(async (cartId: number) => {
-    try {
-      const cartData = await fetchJson(`/cart/${cartId}`);
-      setCart(cartData);
-      return cartData;
-    } catch (e) {
-      console.error("Failed to fetch cart:", e);
-      return null;
-    }
-  }, []);
 
   const handleUpdateQuantity = useCallback(async (itemId: number, quantity: number) => {
     const currentCart = cartRef.current;
@@ -162,9 +163,31 @@ export default function BuyerPage() {
   }, []);
 
   const handleApprovalComplete = useCallback(() => {
-    setApprovalId(null);
+    // Approve path: move the approval into the payment step.
+    setApprovalId((current) => {
+      if (current) setApprovedId(current);
+      return null;
+    });
     if (chatRef.current) {
       chatRef.current.sendMessage("Approval completed");
+    }
+  }, []);
+
+  const handleApprovalRejected = useCallback(() => {
+    // Reject path: clear the gate, no payment step.
+    setApprovalId(null);
+    if (chatRef.current) {
+      chatRef.current.sendMessage("I rejected the purchase");
+    }
+  }, []);
+
+  const handlePaid = useCallback((order: { order_id: number; order_number: string; total_paise: number }) => {
+    setApprovedId(null);
+    setCart(null);
+    if (chatRef.current) {
+      chatRef.current.sendMessage(
+        `Payment successful for order ${order.order_number}. What's next?`
+      );
     }
   }, []);
 
@@ -226,12 +249,15 @@ export default function BuyerPage() {
             cart={cart}
             upsellProducts={upsellProducts}
             approvalId={approvalId}
+            approvedId={approvedId}
             sessionId={sessionId || ""}
             onAddToCart={handleAddToCart}
             onUpdateQuantity={handleUpdateQuantity}
             onRemoveItem={handleRemoveItem}
             onCheckout={handleCheckout}
             onApprovalComplete={handleApprovalComplete}
+            onApprovalRejected={handleApprovalRejected}
+            onPaid={handlePaid}
           />
         </div>
       </div>

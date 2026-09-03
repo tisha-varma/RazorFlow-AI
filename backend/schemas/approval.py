@@ -30,10 +30,12 @@ class PurchaseSummaryItem(BaseModel):
     item_id: int
     product_id: int
     product_name: str
+    category: Optional[str] = None
     quantity: int
     unit_price_paise: int
     total_paise: int
     is_upsell: bool = False
+    reason: Optional[str] = None
 
 
 class PurchaseSummary(BaseModel):
@@ -42,7 +44,9 @@ class PurchaseSummary(BaseModel):
     session_id: str
     items: List[PurchaseSummaryItem]
     subtotal_paise: int
+    upsell_total_paise: int = 0
     total_paise: int
     status: str
     policy_allowed: Optional[bool] = None
     policy_reason: Optional[str] = None
+    policy_details: Optional[dict] = None

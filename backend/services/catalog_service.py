@@ -68,11 +68,47 @@ class CatalogService:
             return total_stock > 0, total_stock, None
 
     @staticmethod
-    def get_related_products(db: Session, product_id: int) -> List[Product]:
+    def get_related_products_with_source(
+        db: Session, product_id: int
+    ) -> tuple[List[Product], str]:
+        """Related products plus which rule produced them.
+
+        Source is "explicit" when curated product_relations rows exist,
+        "tag_fallback" when the rule-based fallback below was used, or
+        "none" when the product is missing / nothing matches. No ML -
+        the fallback is a plain explainable rule: Accessories sharing at
+        least one tag with the primary product, limit 2.
+        """
         product = db.query(Product).filter(Product.id == product_id).first()
         if not product:
-            return []
-        return product.related_products
+            print(f"[CATALOG] related({product_id}): none (product not found)")
+            return [], "none"
+
+        explicit = list(product.related_products or [])
+        if explicit:
+            print(f"[CATALOG] related({product_id}): explicit ({len(explicit)})")
+            return explicit, "explicit"
+
+        primary_tags = set(product.tags or [])
+        fallback: List[Product] = []
+        if primary_tags:
+            candidates = db.query(Product).filter(
+                Product.category.ilike("Accessories"),
+                Product.id != product_id,
+                Product.is_active == True
+            ).all()
+            for acc in candidates:
+                if primary_tags.intersection(set(acc.tags or [])):
+                    fallback.append(acc)
+                    if len(fallback) == 2:
+                        break
+        print(f"[CATALOG] related({product_id}): tag_fallback ({len(fallback)})")
+        return fallback, "tag_fallback"
+
+    @staticmethod
+    def get_related_products(db: Session, product_id: int) -> List[Product]:
+        products, _ = CatalogService.get_related_products_with_source(db, product_id)
+        return products
 
     @staticmethod
     def get_categories(db: Session) -> List[str]:

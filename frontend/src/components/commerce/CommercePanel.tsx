@@ -3,22 +3,32 @@
 import { ProductCard } from "@/components/commerce/ProductCard";
 import { CartSummary } from "@/components/commerce/CartSummary";
 import { UpsellOffer } from "@/components/commerce/UpsellOffer";
+import { PaymentBox } from "@/components/commerce/PaymentBox";
 import ApprovalScreen from "@/components/commerce/ApprovalScreen";
 import { Product, Cart } from "@/lib/types";
 import { ShoppingBag, Package, Sparkles } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+
+interface PaidOrder {
+  order_id: number;
+  order_number: string;
+  total_paise: number;
+}
 
 interface CommercePanelProps {
   products: Product[];
   cart: Cart | null;
   upsellProducts?: Product[];
   approvalId?: number | null;
+  approvedId?: number | null;
   sessionId?: string;
   onAddToCart?: (product: Product) => void;
   onUpdateQuantity?: (itemId: number, quantity: number) => void;
   onRemoveItem?: (itemId: number) => void;
   onCheckout?: () => void;
   onApprovalComplete?: () => void;
+  onApprovalRejected?: () => void;
+  onPaid?: (order: PaidOrder) => void;
 }
 
 export function CommercePanel({
@@ -26,12 +36,15 @@ export function CommercePanel({
   cart,
   upsellProducts = [],
   approvalId = null,
+  approvedId = null,
   sessionId = "",
   onAddToCart,
   onUpdateQuantity,
   onRemoveItem,
   onCheckout,
   onApprovalComplete,
+  onApprovalRejected,
+  onPaid,
 }: CommercePanelProps) {
   const itemCount = cart?.items?.length || 0;
 
@@ -60,7 +73,18 @@ export function CommercePanel({
               approvalId={approvalId}
               sessionId={sessionId}
               onApprove={() => onApprovalComplete?.()}
-              onReject={() => onApprovalComplete?.()}
+              onReject={() => onApprovalRejected?.()}
+            />
+          </div>
+        )}
+
+        {/* Payment Section - Shows after the customer approves */}
+        {approvedId && sessionId && (
+          <div className="p-4 border-b border-slate-800/50">
+            <PaymentBox
+              approvalId={approvedId}
+              sessionId={sessionId}
+              onPaid={onPaid}
             />
           </div>
         )}

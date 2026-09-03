@@ -57,7 +57,7 @@ def create_tool_registry() -> ToolRegistry:
     registry = ToolRegistry()
 
     # Tool 1: search_products
-    async def search_products(db=None, session_id="", query="", filters=None):
+    async def search_products(db=None, session_id="", query="", filters=None, reason=None):
         from backend.services.catalog_service import CatalogService
         filters = filters or {}
         products, total = CatalogService.get_products(
@@ -69,6 +69,9 @@ def create_tool_registry() -> ToolRegistry:
             in_stock=filters.get("in_stock"),
             limit=10
         )
+        # Prefer the LLM's own one-sentence reason; fall back to a truthful
+        # deterministic statement derived from the query itself.
+        fallback = f"Matched your search for '{query}'" if (query or "").strip() else None
         return [
             {
                 "id": p.id,
@@ -77,7 +80,8 @@ def create_tool_registry() -> ToolRegistry:
                 "base_price_paise": p.base_price_paise,
                 "description": p.description,
                 "tags": p.tags or [],
-                "in_stock": any(v.stock_quantity > 0 for v in p.variants) if p.variants else False
+                "in_stock": any(v.stock_quantity > 0 for v in p.variants) if p.variants else False,
+                "reason": (reason or "").strip() or fallback
             }
             for p in products
         ]
@@ -91,6 +95,10 @@ def create_tool_registry() -> ToolRegistry:
                 "query": {
                     "type": "string",
                     "description": "Search query to match against product names, descriptions, and categories"
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "REQUIRED: one sentence explaining why these results fit the customer's stated need (budget, use case, or feature match). Shown on the product card."
                 },
                 "filters": {
                     "type": "object",
@@ -191,9 +199,22 @@ def create_tool_registry() -> ToolRegistry:
     )
 
     # Tool 4: get_related_products
-    async def get_related_products(db=None, session_id="", product_id=0):
+    async def get_related_products(db=None, session_id="", product_id=0, reason=None):
         from backend.services.catalog_service import CatalogService
-        products = CatalogService.get_related_products(db, product_id)
+        products, source = CatalogService.get_related_products_with_source(db, product_id)
+        # Truthful fallback naming the rule that produced the match, so the
+        # path (curated vs tag-based) is visible in the card reasoning text.
+        primary = CatalogService.get_product_by_id(db, product_id)
+        if source == "tag_fallback" and primary:
+            shared = sorted(
+                set(primary.tags or [])
+                & {t for p in products for t in (p.tags or [])}
+            )[:2]
+            fallback = f"Commonly bought with {primary.category}"
+            if shared:
+                fallback += f" — matches {', '.join(shared)}"
+        else:
+            fallback = f"Complements {primary.name}" if primary else None
         return [
             {
                 "id": p.id,
@@ -205,7 +226,8 @@ def create_tool_registry() -> ToolRegistry:
                 "tags": p.tags or [],
                 "is_active": p.is_active,
                 "in_stock": True,
-                "created_at": str(p.created_at) if hasattr(p, 'created_at') else ""
+                "created_at": str(p.created_at) if hasattr(p, 'created_at') else "",
+                "reason": (reason or "").strip() or fallback
             }
             for p in products
         ]
@@ -219,6 +241,10 @@ def create_tool_registry() -> ToolRegistry:
                 "product_id": {
                     "type": "integer",
                     "description": "The product ID to find related items for"
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "REQUIRED: one sentence explaining what problem the upsell solves alongside the primary item. Shown on the upsell card."
                 }
             },
             "required": ["product_id"]
@@ -253,13 +279,34 @@ def create_tool_registry() -> ToolRegistry:
         handler=create_cart
     )
 
-    # Tool 6: add_to_cart
+    # NOTE: calculate_cart, check_purchase_policy, generate_purchase_summary,
+    # and request_payment_approval are intentionally NOT LLM tools. Totals and
+    # policy checks run automatically inside every cart mutation, and approvals
+    # are created deterministically by CheckoutService on checkout intent.
+
+    def _public_payload(payload: dict) -> dict:
+        """Strip the ORM object before returning a payload to the LLM."""
+        return {k: v for k, v in payload.items() if k != "cart"}
+
+    # Tool 6: add_to_cart (totals + policy check included automatically)
     async def add_to_cart(db=None, session_id="", cart_id=0, product_id=0, variant_id=None, quantity=1, is_upsell=False):
         from backend.services.cart_service import CartService
         from backend.services.audit_service import AuditService
-        cart = CartService.add_item(db, cart_id, product_id, variant_id, quantity, is_upsell)
-        if not cart:
-            return {"error": "Failed to add item to cart"}
+        # Resolve the cart deterministically: reuse the session's active cart,
+        # or create one if none exists. Saves a create_cart round trip.
+        try:
+            cart_id = int(cart_id) if cart_id else 0
+        except (ValueError, TypeError):
+            cart_id = 0
+        cart_obj = CartService.get_cart(db, cart_id) if cart_id else None
+        if not cart_obj and session_id:
+            cart_obj = CartService.get_active_cart_by_session(db, session_id)
+        if not cart_obj:
+            cart_obj = CartService.create_cart(db, session_id or "default-session", 1)
+        payload = CartService.add_item(db, cart_obj.id, product_id, variant_id, quantity, is_upsell)
+        if not payload:
+            return {"error": "Failed to add item to cart (product or variant not found)", "cart_id": cart_obj.id}
+        cart = payload["cart"]
         # Log audit
         AuditService.log_event(
             db=db,
@@ -268,32 +315,31 @@ def create_tool_registry() -> ToolRegistry:
             merchant_id=cart.merchant_id,
             session_id=session_id,
             event_data={
-                "cart_id": cart_id,
+                "cart_id": cart.id,
                 "product_id": product_id,
                 "variant_id": variant_id,
                 "quantity": quantity,
                 "is_upsell": is_upsell
             },
             related_entity_type="cart",
-            related_entity_id=cart_id
+            related_entity_id=cart.id
         )
-        totals = CartService.calculate_totals(db, cart_id)
-        return {
-            "cart_id": cart.id,
-            "status": cart.status,
-            "item_count": totals["item_count"],
-            "total_paise": totals["total_paise"]
-        }
+        return _public_payload(payload)
 
     registry.register(
         name="add_to_cart",
-        description="Add a product to the shopping cart. Set is_upsell=true for upsell items.",
+        description=(
+            "Add a product to the shopping cart. Set is_upsell=true for upsell items. "
+            "If cart_id is omitted or 0, the session's active cart is reused or created automatically. "
+            "The response always includes the cart totals and the policy check result "
+            "(policy_allowed, policy_reason) - never call a separate policy tool."
+        ),
         parameters={
             "type": "object",
             "properties": {
                 "cart_id": {
                     "type": "integer",
-                    "description": "The cart ID"
+                    "description": "The cart ID (optional - defaults to the session's active cart)"
                 },
                 "product_id": {
                     "type": "integer",
@@ -312,39 +358,34 @@ def create_tool_registry() -> ToolRegistry:
                     "description": "Whether this is an upsell item (default: false)"
                 }
             },
-            "required": ["cart_id", "product_id"]
+            "required": ["product_id"]
         },
         handler=add_to_cart
     )
 
-    # Tool 7: remove_from_cart
+    # Tool 7: remove_from_cart (totals + policy check included automatically)
     async def remove_from_cart(db=None, session_id="", cart_id=0, item_id=0):
         from backend.services.cart_service import CartService
         from backend.services.audit_service import AuditService
-        cart = CartService.remove_item(db, cart_id, item_id)
-        if not cart:
+        payload = CartService.remove_item(db, cart_id, item_id)
+        if not payload:
             return {"error": "Failed to remove item from cart"}
+        cart = payload["cart"]
         AuditService.log_event(
             db=db,
             event_type="CART_ITEM_REMOVED",
             actor="ai",
             merchant_id=cart.merchant_id,
             session_id=session_id,
-            event_data={"cart_id": cart_id, "item_id": item_id},
+            event_data={"cart_id": cart.id, "item_id": item_id},
             related_entity_type="cart",
-            related_entity_id=cart_id
+            related_entity_id=cart.id
         )
-        totals = CartService.calculate_totals(db, cart_id)
-        return {
-            "cart_id": cart.id,
-            "status": cart.status,
-            "item_count": totals["item_count"],
-            "total_paise": totals["total_paise"]
-        }
+        return _public_payload(payload)
 
     registry.register(
         name="remove_from_cart",
-        description="Remove an item from the shopping cart.",
+        description="Remove an item from the shopping cart. The response includes updated totals and the policy check result.",
         parameters={
             "type": "object",
             "properties": {
@@ -362,23 +403,17 @@ def create_tool_registry() -> ToolRegistry:
         handler=remove_from_cart
     )
 
-    # Tool 8: update_quantity
+    # Tool 8: update_quantity (totals + policy check included automatically)
     async def update_quantity(db=None, session_id="", cart_id=0, item_id=0, quantity=1):
         from backend.services.cart_service import CartService
-        cart = CartService.update_quantity(db, cart_id, item_id, quantity)
-        if not cart:
+        payload = CartService.update_quantity(db, cart_id, item_id, quantity)
+        if not payload:
             return {"error": "Failed to update quantity"}
-        totals = CartService.calculate_totals(db, cart_id)
-        return {
-            "cart_id": cart.id,
-            "status": cart.status,
-            "item_count": totals["item_count"],
-            "total_paise": totals["total_paise"]
-        }
+        return _public_payload(payload)
 
     registry.register(
         name="update_quantity",
-        description="Update the quantity of an item in the cart.",
+        description="Update the quantity of an item in the cart. The response includes updated totals and the policy check result.",
         parameters={
             "type": "object",
             "properties": {
@@ -398,169 +433,6 @@ def create_tool_registry() -> ToolRegistry:
             "required": ["cart_id", "item_id", "quantity"]
         },
         handler=update_quantity
-    )
-
-    # Tool 9: calculate_cart
-    async def calculate_cart(db=None, session_id="", cart_id=0):
-        from backend.services.cart_service import CartService
-        totals = CartService.calculate_totals(db, cart_id)
-        if not totals:
-            return {"error": "Cart not found"}
-        return totals
-
-    registry.register(
-        name="calculate_cart",
-        description="Calculate the current cart totals including subtotal, total, and item breakdown.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "cart_id": {
-                    "type": "integer",
-                    "description": "The cart ID"
-                }
-            },
-            "required": ["cart_id"]
-        },
-        handler=calculate_cart
-    )
-
-    # Tool 10: check_purchase_policy
-    async def check_purchase_policy(db=None, session_id="", cart_id=0):
-        from backend.services.policy_engine import PolicyEngine
-        from backend.models.policy import CommercePolicy
-        from backend.services.audit_service import AuditService
-        policy = db.query(CommercePolicy).filter(CommercePolicy.is_active == True).first()
-        if not policy:
-            return {"error": "No active commerce policy found"}
-        result = PolicyEngine.check_purchase_policy(db, cart_id, session_id, policy)
-        AuditService.log_event(
-            db=db,
-            event_type="POLICY_CHECK_PASSED" if result.allowed else "POLICY_CHECK_FAILED",
-            actor="system",
-            merchant_id=policy.merchant_id,
-            session_id=session_id,
-            event_data={
-                "cart_id": cart_id,
-                "allowed": result.allowed,
-                "reason": result.reason
-            },
-            related_entity_type="cart",
-            related_entity_id=cart_id
-        )
-        return result.to_dict()
-
-    registry.register(
-        name="check_purchase_policy",
-        description="Check if the cart contents comply with the merchant's commerce policy. Returns allowed/blocked status.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "cart_id": {
-                    "type": "integer",
-                    "description": "The cart ID to check"
-                }
-            },
-            "required": ["cart_id"]
-        },
-        handler=check_purchase_policy
-    )
-
-    # Tool 11: generate_purchase_summary
-    async def generate_purchase_summary(db=None, session_id="", cart_id=0):
-        from backend.services.cart_service import CartService
-        from backend.services.policy_engine import PolicyEngine
-        from backend.models.policy import CommercePolicy
-        totals = CartService.calculate_totals(db, cart_id)
-        if not totals:
-            return {"error": "Cart not found"}
-        policy = db.query(CommercePolicy).filter(CommercePolicy.is_active == True).first()
-        policy_result = PolicyEngine.check_purchase_policy(db, cart_id, session_id, policy) if policy else None
-        return {
-            "cart_id": cart_id,
-            "items": totals["items"],
-            "subtotal_paise": totals["subtotal_paise"],
-            "total_paise": totals["total_paise"],
-            "policy_allowed": policy_result.allowed if policy_result else None,
-            "policy_reason": policy_result.reason if policy_result else None
-        }
-
-    registry.register(
-        name="generate_purchase_summary",
-        description="Generate a full purchase summary for the current cart including item details and policy check.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "cart_id": {
-                    "type": "integer",
-                    "description": "The cart ID"
-                }
-            },
-            "required": ["cart_id"]
-        },
-        handler=generate_purchase_summary
-    )
-
-    # Tool 12: request_payment_approval
-    async def request_payment_approval(db=None, session_id="", cart_id=0):
-        from backend.models.approval import Approval
-        from backend.services.cart_service import CartService
-        from backend.services.audit_service import AuditService
-        from backend.models.merchant import Merchant
-        totals = CartService.calculate_totals(db, cart_id)
-        if not totals:
-            return {"error": "Cart not found"}
-        merchant = db.query(Merchant).first()
-        merchant_id = merchant.id if merchant else 1
-        summary_json = {
-            "items": totals["items"],
-            "subtotal_paise": totals["subtotal_paise"],
-            "total_paise": totals["total_paise"]
-        }
-        approval = Approval(
-            session_id=session_id,
-            cart_id=cart_id,
-            requested_amount_paise=totals["total_paise"],
-            status="pending",
-            summary_json=summary_json
-        )
-        db.add(approval)
-        db.commit()
-        db.refresh(approval)
-        AuditService.log_event(
-            db=db,
-            event_type="PAYMENT_APPROVAL_REQUESTED",
-            actor="ai",
-            merchant_id=merchant_id,
-            session_id=session_id,
-            event_data={
-                "approval_id": approval.id,
-                "cart_id": cart_id,
-                "amount_paise": totals["total_paise"]
-            },
-            related_entity_type="approval",
-            related_entity_id=approval.id
-        )
-        return {
-            "approval_id": approval.id,
-            "status": approval.status,
-            "requested_amount_paise": approval.requested_amount_paise,
-            "summary": summary_json
-        }
-
-    registry.register(
-        name="request_payment_approval",
-        description="Request user approval for a purchase. Creates a pending approval record that the user must explicitly approve.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "cart_id": {
-                    "type": "integer",
-                    "description": "The cart ID"
-                }
-            },
-            "required": ["cart_id"]
-        },
-        handler=request_payment_approval
     )
 
     return registry

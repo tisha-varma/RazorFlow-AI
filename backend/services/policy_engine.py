@@ -84,6 +84,9 @@ class PolicyEngine:
                 "max_transaction": policy.max_transaction_amount_paise,
                 "cart_total": cart_total,
                 "session_spent": session_spent,
+                "spending_limit_paise": policy.spending_limit_paise,
+                "max_upsell_amount_paise": policy.max_upsell_amount_paise,
+                "upsell_total_paise": upsell_total,
                 "remaining_budget": policy.spending_limit_paise - session_spent - cart_total,
                 "approval_required": policy.require_approval
             }

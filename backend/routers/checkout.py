@@ -2,15 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models.approval import Approval
-from backend.models.cart import Cart
-from backend.services.cart_service import CartService
-from backend.services.policy_engine import PolicyEngine
 from backend.services.state_machine import state_machine, SessionState, VALID_TRANSITIONS
 from backend.services.audit_service import AuditService
 from backend.schemas.approval import ApprovalOut, ApprovalRequest, ApprovalActionRequest, PurchaseSummary, PurchaseSummaryItem
-from backend.models.policy import CommercePolicy
-from backend.models.merchant import Merchant
-from typing import List
 
 router = APIRouter(prefix="/checkout", tags=["Checkout"])
 
@@ -26,76 +20,75 @@ def _require_transition(session_id: str, target: SessionState):
 
 @router.get("/summary/{cart_id}", response_model=PurchaseSummary)
 def get_purchase_summary(cart_id: int, session_id: str, db: Session = Depends(get_db)):
-    totals = CartService.calculate_totals(db, cart_id)
-    if not totals:
-        raise HTTPException(status_code=404, detail="Cart not found")
+    from backend.services.checkout_service import CheckoutService
 
-    policy = db.query(CommercePolicy).filter(CommercePolicy.is_active == True).first()
-    policy_result = PolicyEngine.check_purchase_policy(db, cart_id, session_id, policy) if policy else None
-
-    approval = db.query(Approval).filter(
-        Approval.cart_id == cart_id,
-        Approval.session_id == session_id,
-        Approval.status == "pending"
-    ).first()
+    summary = CheckoutService.build_summary(db, session_id, cart_id)
+    if "error" in summary:
+        raise HTTPException(status_code=404, detail=summary["error"])
 
     return PurchaseSummary(
-        approval_id=approval.id if approval else 0,
-        cart_id=cart_id,
-        session_id=session_id,
-        items=[PurchaseSummaryItem(**item) for item in totals["items"]],
-        subtotal_paise=totals["subtotal_paise"],
-        total_paise=totals["total_paise"],
-        status=approval.status if approval else "none",
-        policy_allowed=policy_result.allowed if policy_result else None,
-        policy_reason=policy_result.reason if policy_result else None
+        approval_id=summary["approval_id"],
+        cart_id=summary["cart_id"],
+        session_id=summary["session_id"],
+        items=[PurchaseSummaryItem(**item) for item in summary["items"]],
+        subtotal_paise=summary["subtotal_paise"],
+        upsell_total_paise=summary["upsell_total_paise"],
+        total_paise=summary["total_paise"],
+        status=summary["status"],
+        policy_allowed=summary["policy_allowed"],
+        policy_reason=summary["policy_reason"],
+        policy_details=summary["policy_details"]
+    )
+
+
+@router.get("/approval/{approval_id}/summary", response_model=PurchaseSummary)
+def get_approval_summary(approval_id: int, session_id: str, db: Session = Depends(get_db)):
+    """Self-sufficient summary for the approval screen: only the approval
+    ID and session are needed, no cart plumbing in the frontend."""
+    from backend.services.checkout_service import CheckoutService
+
+    approval = db.query(Approval).filter(Approval.id == approval_id).first()
+    if not approval:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    if approval.session_id != session_id:
+        raise HTTPException(status_code=403, detail="Session mismatch")
+
+    summary = CheckoutService.build_summary(db, session_id, approval.cart_id)
+    if "error" in summary:
+        raise HTTPException(status_code=404, detail=summary["error"])
+    summary["approval_id"] = approval.id
+    summary["status"] = approval.status
+
+    return PurchaseSummary(
+        approval_id=summary["approval_id"],
+        cart_id=summary["cart_id"],
+        session_id=summary["session_id"],
+        items=[PurchaseSummaryItem(**item) for item in summary["items"]],
+        subtotal_paise=summary["subtotal_paise"],
+        upsell_total_paise=summary["upsell_total_paise"],
+        total_paise=summary["total_paise"],
+        status=summary["status"],
+        policy_allowed=summary["policy_allowed"],
+        policy_reason=summary["policy_reason"],
+        policy_details=summary["policy_details"]
     )
 
 
 @router.post("/request-approval", response_model=ApprovalOut)
 def request_approval(req: ApprovalRequest, db: Session = Depends(get_db)):
+    from backend.services.checkout_service import CheckoutService
+
     _require_transition(req.session_id, SessionState.AWAITING_APPROVAL)
 
-    totals = CartService.calculate_totals(db, req.cart_id)
-    if not totals:
-        raise HTTPException(status_code=404, detail="Cart not found")
-
-    merchant = db.query(Merchant).first()
-    merchant_id = merchant.id if merchant else 1
-
-    approval = Approval(
-        session_id=req.session_id,
-        cart_id=req.cart_id,
-        requested_amount_paise=totals["total_paise"],
-        status="pending",
-        summary_json={
-            "items": totals["items"],
-            "subtotal_paise": totals["subtotal_paise"],
-            "total_paise": totals["total_paise"]
-        }
-    )
-    db.add(approval)
-    db.commit()
-    db.refresh(approval)
-
-    state_machine.set_state(req.session_id, SessionState.AWAITING_APPROVAL)
-
-    AuditService.log_event(
-        db=db,
-        event_type="PAYMENT_APPROVAL_REQUESTED",
-        actor="system",
-        merchant_id=merchant_id,
-        session_id=req.session_id,
-        event_data={
-            "approval_id": approval.id,
-            "cart_id": req.cart_id,
-            "amount_paise": totals["total_paise"]
-        },
-        related_entity_type="approval",
-        related_entity_id=approval.id
-    )
-
-    return approval
+    result = CheckoutService.create_approval(db, req.session_id, req.cart_id)
+    if "approval" not in result:
+        if result.get("error") == "Cart not found":
+            raise HTTPException(status_code=404, detail="Cart not found")
+        raise HTTPException(
+            status_code=400,
+            detail=result.get("policy_reason") or result.get("error")
+        )
+    return result["approval"]
 
 
 @router.post("/approve/{approval_id}", response_model=ApprovalOut)

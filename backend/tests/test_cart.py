@@ -76,3 +76,26 @@ class TestCartEndpoints:
     def test_cart_not_found(self, client):
         resp = client.get("/api/cart/9999")
         assert resp.status_code == 404
+
+    def test_add_item_returns_policy_allowed(self, client, seed_data):
+        p1 = seed_data["p1"]
+        cart = client.post("/api/cart", json={"session_id": "test-sess", "merchant_id": 1}).json()
+        resp = client.post(f"/api/cart/{cart['id']}/items", json={
+            "product_id": p1.id,
+            "quantity": 1
+        })
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["policy_allowed"] is True
+
+    def test_add_item_returns_policy_blocked(self, client, seed_data):
+        p1 = seed_data["p1"]
+        cart = client.post("/api/cart", json={"session_id": "test-sess", "merchant_id": 1}).json()
+        resp = client.post(f"/api/cart/{cart['id']}/items", json={
+            "product_id": p1.id,
+            "quantity": 2
+        })
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["policy_allowed"] is False
+        assert "exceeds" in data["policy_reason"].lower()

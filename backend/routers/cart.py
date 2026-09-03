@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from typing import Optional
 from backend.database import get_db
 from backend.schemas.cart import CartOut, CartCreate, CartItemCreate, CartItemUpdate, CartCalculateResponse
 from backend.services.cart_service import CartService
@@ -9,7 +10,12 @@ from backend.models.product import Product
 router = APIRouter(prefix="/cart", tags=["Cart"])
 
 
-def cart_with_names(cart: Cart, db: Session) -> dict:
+def cart_with_names(
+    cart: Cart,
+    db: Session,
+    policy_allowed: Optional[bool] = None,
+    policy_reason: Optional[str] = None
+) -> dict:
     """Add product names to cart items."""
     # Fetch product names in bulk
     product_ids = [item.product_id for item in cart.items]
@@ -29,6 +35,14 @@ def cart_with_names(cart: Cart, db: Session) -> dict:
             "product_name": product_name,
             "created_at": item.created_at
         })
+
+    # Attach a fresh policy check unless the caller already ran one.
+    if policy_allowed is None:
+        from backend.services.cart_service import CartService
+        policy = CartService.check_cart_policy(db, cart)
+        policy_allowed = policy["allowed"]
+        policy_reason = policy["reason"]
+
     return {
         "id": cart.id,
         "session_id": cart.session_id,
@@ -37,7 +51,9 @@ def cart_with_names(cart: Cart, db: Session) -> dict:
         "status": cart.status,
         "created_at": cart.created_at,
         "updated_at": cart.updated_at,
-        "items": items
+        "items": items,
+        "policy_allowed": policy_allowed,
+        "policy_reason": policy_reason
     }
 
 
@@ -57,28 +73,40 @@ def get_cart(cart_id: int, db: Session = Depends(get_db)):
 
 @router.post("/{cart_id}/items", status_code=status.HTTP_201_CREATED)
 def add_item(cart_id: int, item: CartItemCreate, db: Session = Depends(get_db)):
-    cart = CartService.add_item(
+    payload = CartService.add_item(
         db, cart_id, item.product_id, item.variant_id, item.quantity, item.is_upsell
     )
-    if not cart:
+    if not payload:
         raise HTTPException(status_code=404, detail="Cart or product not found")
-    return cart_with_names(cart, db)
+    return cart_with_names(
+        payload["cart"], db,
+        policy_allowed=payload["policy_allowed"],
+        policy_reason=payload["policy_reason"]
+    )
 
 
 @router.put("/{cart_id}/items/{item_id}")
 def update_item(cart_id: int, item_id: int, update: CartItemUpdate, db: Session = Depends(get_db)):
-    cart = CartService.update_quantity(db, cart_id, item_id, update.quantity)
-    if not cart:
+    payload = CartService.update_quantity(db, cart_id, item_id, update.quantity)
+    if not payload:
         raise HTTPException(status_code=404, detail="Cart or item not found")
-    return cart_with_names(cart, db)
+    return cart_with_names(
+        payload["cart"], db,
+        policy_allowed=payload["policy_allowed"],
+        policy_reason=payload["policy_reason"]
+    )
 
 
 @router.delete("/{cart_id}/items/{item_id}")
 def remove_item(cart_id: int, item_id: int, db: Session = Depends(get_db)):
-    cart = CartService.remove_item(db, cart_id, item_id)
-    if not cart:
+    payload = CartService.remove_item(db, cart_id, item_id)
+    if not payload:
         raise HTTPException(status_code=404, detail="Cart or item not found")
-    return cart_with_names(cart, db)
+    return cart_with_names(
+        payload["cart"], db,
+        policy_allowed=payload["policy_allowed"],
+        policy_reason=payload["policy_reason"]
+    )
 
 
 @router.get("/{cart_id}/calculate", response_model=CartCalculateResponse)

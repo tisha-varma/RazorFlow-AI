@@ -1,0 +1,259 @@
+import hashlib
+import hmac
+import json
+import time
+
+import pytest
+
+from backend.services.state_machine import state_machine, SessionState
+
+
+def _approved_approval(client, seed_data, session_id):
+    """Cart + policy walk + request + approve. Returns approval json."""
+    p1 = seed_data["p1"]
+    cart = client.post("/api/cart", json={"session_id": session_id, "merchant_id": 1}).json()
+    client.post(f"/api/cart/{cart['id']}/items", json={"product_id": p1.id, "quantity": 1})
+    state_machine.set_state(session_id, SessionState.DISCOVERING)
+    state_machine.set_state(session_id, SessionState.CART_BUILDING)
+    state_machine.set_state(session_id, SessionState.POLICY_CHECK)
+    appr = client.post(
+        "/api/checkout/request-approval",
+        json={"cart_id": cart["id"], "session_id": session_id},
+    ).json()
+    appr = client.post(
+        f"/api/checkout/approve/{appr['id']}", json={"session_id": session_id}
+    ).json()
+    assert appr["status"] == "approved"
+    return appr, cart
+
+
+def _mock_gateway(monkeypatch, order_id="order_test123", verified=True):
+    from backend.services import payment_service as ps
+
+    calls = {"orders": 0}
+
+    def fake_create(amount_paise, receipt_id, notes=None):
+        calls["orders"] += 1
+        return {
+            "razorpay_order_id": order_id,
+            "amount_paise": amount_paise,
+            "currency": "INR",
+            "status": "created",
+        }
+
+    monkeypatch.setattr(ps, "create_razorpay_order", fake_create)
+    monkeypatch.setattr(ps, "verify_payment_signature", lambda *a: verified)
+    return calls
+
+
+class TestCreateOrder:
+    def test_requires_approved_approval(self, client, seed_data):
+        p1 = seed_data["p1"]
+        cart = client.post("/api/cart", json={"session_id": "pay-sess-1", "merchant_id": 1}).json()
+        client.post(f"/api/cart/{cart['id']}/items", json={"product_id": p1.id, "quantity": 1})
+        state_machine.set_state("pay-sess-1", SessionState.DISCOVERING)
+        state_machine.set_state("pay-sess-1", SessionState.CART_BUILDING)
+        state_machine.set_state("pay-sess-1", SessionState.POLICY_CHECK)
+        appr = client.post(
+            "/api/checkout/request-approval",
+            json={"cart_id": cart["id"], "session_id": "pay-sess-1"},
+        ).json()
+        assert appr["status"] == "pending"
+
+        resp = client.post(f"/api/payment/create-order/{appr['id']}", json={"session_id": "pay-sess-1"})
+        assert resp.status_code == 400
+
+    def test_success_creates_order_and_payment_rows(self, client, seed_data, monkeypatch):
+        from backend.models.order import Order
+        from backend.models.payment import RazorpayPayment
+        from backend.models.audit import AuditEvent
+        from backend.database import get_db  # noqa: F401
+
+        _mock_gateway(monkeypatch)
+        appr, cart = _approved_approval(client, seed_data, "pay-sess-2")
+
+        resp = client.post(f"/api/payment/create-order/{appr['id']}", json={"session_id": "pay-sess-2"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["razorpay_order_id"] == "order_test123"
+        assert data["amount_paise"] == 449900
+        assert data["currency"] == "INR"
+
+        # Inspect DB via a fresh API-visible check: order pending, payment created.
+        assert state_machine.get_state("pay-sess-2") == SessionState.PAYMENT_PENDING
+
+    def test_idempotent_on_retry(self, client, seed_data, monkeypatch):
+        calls = _mock_gateway(monkeypatch, order_id="order_dup1")
+        appr, cart = _approved_approval(client, seed_data, "pay-sess-3")
+
+        r1 = client.post(f"/api/payment/create-order/{appr['id']}", json={"session_id": "pay-sess-3"})
+        r2 = client.post(f"/api/payment/create-order/{appr['id']}", json={"session_id": "pay-sess-3"})
+        assert r1.status_code == 200 and r2.status_code == 200
+        assert r1.json()["razorpay_order_id"] == r2.json()["razorpay_order_id"]
+        assert calls["orders"] == 1
+
+    def test_missing_credentials_503(self, client, seed_data, monkeypatch):
+        from backend.config import settings
+        monkeypatch.setattr(settings, "RAZORPAY_KEY_ID", "")
+        monkeypatch.setattr(settings, "RAZORPAY_KEY_SECRET", "")
+        appr, cart = _approved_approval(client, seed_data, "pay-sess-4")
+
+        resp = client.post(f"/api/payment/create-order/{appr['id']}", json={"session_id": "pay-sess-4"})
+        assert resp.status_code == 503
+
+    def test_session_mismatch_403(self, client, seed_data, monkeypatch):
+        _mock_gateway(monkeypatch)
+        appr, cart = _approved_approval(client, seed_data, "pay-sess-5")
+        resp = client.post(f"/api/payment/create-order/{appr['id']}", json={"session_id": "wrong-sess"})
+        assert resp.status_code == 403
+
+
+class TestVerify:
+    def _order_for(self, client, seed_data, monkeypatch, session_id, order_id="order_v1"):
+        _mock_gateway(monkeypatch, order_id=order_id)
+        appr, cart = _approved_approval(client, seed_data, session_id)
+        data = client.post(
+            f"/api/payment/create-order/{appr['id']}", json={"session_id": session_id}
+        ).json()
+        return appr, data
+
+    def test_verify_success_marks_paid(self, client, seed_data, monkeypatch):
+        from backend.models.order import Order
+        from backend.models.approval import Approval
+        from backend.models.audit import AuditEvent
+
+        appr, data = self._order_for(client, seed_data, monkeypatch, "pay-v-1", "order_v1")
+        resp = client.post("/api/payment/verify", json={
+            "razorpay_order_id": "order_v1",
+            "razorpay_payment_id": "pay_test1",
+            "razorpay_signature": "sig_test",
+            "session_id": "pay-v-1",
+        })
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "paid"
+        assert state_machine.get_state("pay-v-1") == SessionState.ORDER_CONFIRMED
+
+    def test_verify_bad_signature_fails_without_paid_order(self, client, seed_data, monkeypatch):
+        from backend.models.order import Order
+
+        appr, data = self._order_for(client, seed_data, monkeypatch, "pay-v-2", "order_v2")
+        # Flip the mock to reject AFTER order creation.
+        from backend.services import payment_service as ps
+        monkeypatch.setattr(ps, "verify_payment_signature", lambda *a: False)
+
+        resp = client.post("/api/payment/verify", json={
+            "razorpay_order_id": "order_v2",
+            "razorpay_payment_id": "pay_bad",
+            "razorpay_signature": "bad",
+            "session_id": "pay-v-2",
+        })
+        assert resp.status_code == 400
+        assert state_machine.get_state("pay-v-2") == SessionState.PAYMENT_FAILED
+
+    def test_verify_unknown_order_404(self, client):
+        resp = client.post("/api/payment/verify", json={
+            "razorpay_order_id": "order_nope",
+            "razorpay_payment_id": "pay_x",
+            "razorpay_signature": "sig",
+            "session_id": "pay-v-3",
+        })
+        assert resp.status_code == 404
+
+    def test_verify_idempotent(self, client, seed_data, monkeypatch):
+        appr, data = self._order_for(client, seed_data, monkeypatch, "pay-v-4", "order_v4")
+        payload = {
+            "razorpay_order_id": "order_v4",
+            "razorpay_payment_id": "pay_dup",
+            "razorpay_signature": "sig",
+            "session_id": "pay-v-4",
+        }
+        r1 = client.post("/api/payment/verify", json=payload)
+        r2 = client.post("/api/payment/verify", json=payload)
+        assert r1.status_code == 200 and r2.status_code == 200
+        assert r1.json()["order_id"] == r2.json()["order_id"]
+
+
+def _signed_webhook(secret, payload_dict):
+    body = json.dumps(payload_dict, separators=(",", ":")).encode()
+    sig = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    return body, sig
+
+
+class TestWebhook:
+    def test_captured_reconciles_unpaid_order(self, client, seed_data, monkeypatch):
+        from backend.config import settings
+        monkeypatch.setattr(settings, "RAZORPAY_WEBHOOK_SECRET", "whsec_test")
+
+        appr, data = TestVerify()._order_for(client, seed_data, monkeypatch, "pay-w-1", "order_w1")
+        payload = {
+            "event": "payment.captured",
+            "created_at": int(time.time()),
+            "payload": {"payment": {"entity": {
+                "id": "pay_web1", "order_id": "order_w1",
+                "amount": 449900, "method": "upi", "captured": True,
+            }}},
+        }
+        body, sig = _signed_webhook("whsec_test", payload)
+        resp = client.post("/api/payment/webhook", content=body, headers={
+            "Content-Type": "application/json", "X-Razorpay-Signature": sig,
+        })
+        assert resp.status_code == 200
+        assert state_machine.get_state("pay-w-1") == SessionState.ORDER_CONFIRMED
+
+        # Duplicate delivery: idempotent, still one paid order.
+        dup = client.post("/api/payment/webhook", content=body, headers={
+            "Content-Type": "application/json", "X-Razorpay-Signature": sig,
+        })
+        assert dup.status_code == 200
+        assert "duplicate" in dup.json()["detail"]
+
+    def test_bad_signature_rejected(self, client):
+        from backend.config import settings
+        from unittest.mock import patch
+        with patch.object(settings, "RAZORPAY_WEBHOOK_SECRET", "whsec_test"):
+            payload = {"event": "payment.captured", "payload": {}}
+            body = json.dumps(payload).encode()
+            resp = client.post("/api/payment/webhook", content=body, headers={
+                "Content-Type": "application/json", "X-Razorpay-Signature": "bad",
+            })
+            assert resp.status_code == 400
+
+    def test_failed_marks_order_failed(self, client, seed_data, monkeypatch):
+        from backend.config import settings
+        monkeypatch.setattr(settings, "RAZORPAY_WEBHOOK_SECRET", "whsec_test")
+
+        appr, data = TestVerify()._order_for(client, seed_data, monkeypatch, "pay-w-2", "order_w2")
+        payload = {
+            "event": "payment.failed",
+            "created_at": int(time.time()),
+            "payload": {"payment": {"entity": {
+                "id": "pay_webfail", "order_id": "order_w2",
+                "error_code": "BAD_REQUEST_ERROR",
+                "error_description": "Payment declined",
+            }}},
+        }
+        body, sig = _signed_webhook("whsec_test", payload)
+        resp = client.post("/api/payment/webhook", content=body, headers={
+            "Content-Type": "application/json", "X-Razorpay-Signature": sig,
+        })
+        assert resp.status_code == 200
+        assert state_machine.get_state("pay-w-2") == SessionState.PAYMENT_FAILED
+
+    def test_unknown_order_ignored(self, client, monkeypatch):
+        from backend.config import settings
+        monkeypatch.setattr(settings, "RAZORPAY_WEBHOOK_SECRET", "whsec_test")
+        payload = {
+            "event": "payment.captured",
+            "created_at": int(time.time()),
+            "payload": {"payment": {"entity": {
+                "id": "pay_ghost", "order_id": "order_ghost",
+                "amount": 100, "method": "card", "captured": True,
+            }}},
+        }
+        body, sig = _signed_webhook("whsec_test", payload)
+        resp = client.post("/api/payment/webhook", content=body, headers={
+            "Content-Type": "application/json", "X-Razorpay-Signature": sig,
+        })
+        assert resp.status_code == 200
+        assert "unknown" in resp.json()["detail"]

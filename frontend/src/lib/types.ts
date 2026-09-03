@@ -28,6 +28,7 @@ export interface Product {
   tags: string[];
   is_active: boolean;
   created_at: string;
+  reason?: string;
   variants?: ProductVariant[];
   related_products?: Product[];
 }

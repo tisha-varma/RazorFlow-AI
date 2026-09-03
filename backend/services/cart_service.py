@@ -1,10 +1,67 @@
 from sqlalchemy.orm import Session
 from backend.models.cart import Cart, CartItem
 from backend.models.product import Product, ProductVariant
+from backend.models.policy import CommercePolicy
+from backend.services.policy_engine import PolicyEngine
+from backend.services.audit_service import AuditService
 from typing import Optional, List, Dict, Any
 
 
 class CartService:
+    @staticmethod
+    def check_cart_policy(db: Session, cart: Cart) -> Dict[str, Any]:
+        """Run the active commerce policy against a cart. Internal only."""
+        policy = db.query(CommercePolicy).filter(CommercePolicy.is_active == True).first()
+        if not policy:
+            return {
+                "allowed": True,
+                "reason": "No active commerce policy - defaulting to allow",
+                "details": {}
+            }
+        result = PolicyEngine.check_purchase_policy(db, cart.id, cart.session_id, policy)
+        return {
+            "allowed": result.allowed,
+            "reason": result.reason,
+            "details": result.policy_details
+        }
+
+    @staticmethod
+    def _mutation_payload(db: Session, cart: Cart) -> Dict[str, Any]:
+        """Build the return payload for a cart mutation.
+
+        Every mutation automatically runs the policy check so the caller
+        (LLM tool handler or REST endpoint) sees allowed/blocked + reason
+        without a separate policy round trip.
+        """
+        totals = CartService.calculate_totals(db, cart.id)
+        policy = CartService.check_cart_policy(db, cart)
+
+        AuditService.log_event(
+            db=db,
+            event_type="POLICY_CHECK_PASSED" if policy["allowed"] else "POLICY_CHECK_FAILED",
+            actor="system",
+            merchant_id=cart.merchant_id,
+            session_id=cart.session_id,
+            event_data={
+                "cart_id": cart.id,
+                "allowed": policy["allowed"],
+                "reason": policy["reason"]
+            },
+            related_entity_type="cart",
+            related_entity_id=cart.id
+        )
+
+        return {
+            "cart": cart,
+            "cart_id": cart.id,
+            "status": cart.status,
+            "item_count": totals["item_count"] if totals else 0,
+            "total_paise": totals["total_paise"] if totals else 0,
+            "items": totals["items"] if totals else [],
+            "policy_allowed": policy["allowed"],
+            "policy_reason": policy["reason"],
+            "policy_details": policy["details"]
+        }
     @staticmethod
     def create_cart(db: Session, session_id: str, merchant_id: int = 1) -> Cart:
         cart = Cart(
@@ -36,7 +93,7 @@ class CartService:
         variant_id: Optional[int] = None,
         quantity: int = 1,
         is_upsell: bool = False
-    ) -> Optional[Cart]:
+    ) -> Optional[Dict[str, Any]]:
         cart = db.query(Cart).filter(Cart.id == cart_id).first()
         if not cart:
             return None
@@ -79,10 +136,10 @@ class CartService:
 
         db.commit()
         db.refresh(cart)
-        return cart
+        return CartService._mutation_payload(db, cart)
 
     @staticmethod
-    def remove_item(db: Session, cart_id: int, item_id: int) -> Optional[Cart]:
+    def remove_item(db: Session, cart_id: int, item_id: int) -> Optional[Dict[str, Any]]:
         cart = db.query(Cart).filter(Cart.id == cart_id).first()
         if not cart:
             return None
@@ -97,10 +154,10 @@ class CartService:
         db.delete(item)
         db.commit()
         db.refresh(cart)
-        return cart
+        return CartService._mutation_payload(db, cart)
 
     @staticmethod
-    def update_quantity(db: Session, cart_id: int, item_id: int, quantity: int) -> Optional[Cart]:
+    def update_quantity(db: Session, cart_id: int, item_id: int, quantity: int) -> Optional[Dict[str, Any]]:
         cart = db.query(Cart).filter(Cart.id == cart_id).first()
         if not cart:
             return None
@@ -115,7 +172,7 @@ class CartService:
         item.quantity = quantity
         db.commit()
         db.refresh(cart)
-        return cart
+        return CartService._mutation_payload(db, cart)
 
     @staticmethod
     def calculate_totals(db: Session, cart_id: int) -> Optional[Dict[str, Any]]:
@@ -125,13 +182,17 @@ class CartService:
 
         items_data = []
         subtotal = 0
+        upsell_total = 0
         for item in cart.items:
             item_total = item.unit_price_paise * item.quantity
             subtotal += item_total
+            if item.is_upsell:
+                upsell_total += item_total
             prod_name = item.product.name if item.product else f"Product #{item.product_id}"
             items_data.append({
                 "item_id": item.id,
                 "product_id": item.product_id,
+                "variant_id": item.variant_id,
                 "product_name": prod_name,
                 "quantity": item.quantity,
                 "unit_price_paise": item.unit_price_paise,
@@ -141,6 +202,7 @@ class CartService:
 
         return {
             "subtotal_paise": subtotal,
+            "upsell_total_paise": upsell_total,
             "total_paise": subtotal,
             "item_count": len(cart.items),
             "items": items_data

@@ -31,6 +31,11 @@ export function UpsellOffer({ products, onAddToCart }: UpsellOfferProps) {
               <span className="text-sm text-amber-100 truncate block">
                 {product.name}
               </span>
+              {product.reason && (
+                <p className="text-xs italic text-amber-200/80 mt-0.5 line-clamp-2">
+                  Why this fits: {product.reason}
+                </p>
+              )}
               <div className="flex items-center gap-2 mt-0.5">
                 <span className="text-xs text-amber-400/70">
                   {product.category}
