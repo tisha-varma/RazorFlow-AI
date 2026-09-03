@@ -20,6 +20,7 @@ interface CommercePanelProps {
   cart: Cart | null;
   upsellProducts?: Product[];
   approvalId?: number | null;
+  approvalToken?: string | null;
   approvedId?: number | null;
   sessionId?: string;
   onAddToCart?: (product: Product) => void;
@@ -36,6 +37,7 @@ export function CommercePanel({
   cart,
   upsellProducts = [],
   approvalId = null,
+  approvalToken = null,
   approvedId = null,
   sessionId = "",
   onAddToCart,
@@ -71,6 +73,7 @@ export function CommercePanel({
           <div className="p-4">
             <ApprovalScreen
               approvalId={approvalId}
+              approvalToken={approvalToken}
               sessionId={sessionId}
               onApprove={() => onApprovalComplete?.()}
               onReject={() => onApprovalRejected?.()}

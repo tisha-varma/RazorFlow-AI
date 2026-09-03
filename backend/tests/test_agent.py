@@ -7,11 +7,13 @@ class TestAgentToolRegistry:
         from backend.services.ai.tool_registry import create_tool_registry
         registry = create_tool_registry()
         names = registry.get_tool_names()
-        # Only judgment-requiring tools are LLM-facing. Totals, policy checks,
-        # summaries, and approvals run deterministically in the backend.
+        # Only judgment-requiring tools are LLM-facing. Totals, policy checks
+        # and summaries run deterministically; checkout is one explicit tool
+        # so Approval creation is LLM-intentional, never regex-triggered.
         expected = [
             "search_products", "get_product", "check_stock", "get_related_products",
-            "create_cart", "add_to_cart", "remove_from_cart", "update_quantity"
+            "create_cart", "add_to_cart", "remove_from_cart", "update_quantity",
+            "initiate_checkout"
         ]
         assert sorted(names) == sorted(expected)
 
@@ -170,11 +172,43 @@ class _FakeLLMClient:
         return self.script[idx]
 
 
-class TestDeterministicCheckout:
+class TestInitiateCheckoutTool:
     @pytest.mark.asyncio
-    async def test_checkout_intent_creates_approval_in_one_llm_call(self, db_session, seed_data):
+    async def test_tool_creates_approval_with_token(self, db_session, seed_data):
+        from backend.services.ai.tool_registry import create_tool_registry
+        from backend.services.cart_service import CartService
+
+        session_id = "co-tool-1"
+        cart = CartService.create_cart(db_session, session_id, 1)
+        CartService.add_item(db_session, cart.id, seed_data["p1"].id, quantity=1)
+
+        registry = create_tool_registry()
+        result = await registry.execute("initiate_checkout", {}, db=db_session, session_id=session_id)
+        assert result["approval_id"] > 0
+        assert result["approval_token"] and len(result["approval_token"]) >= 32
+        assert result["total_paise"] == 449900
+        assert result["policy_allowed"] is True
+
+    @pytest.mark.asyncio
+    async def test_tool_blocked_reports_no_approval(self, db_session, seed_data):
+        from backend.services.ai.tool_registry import create_tool_registry
+        from backend.services.cart_service import CartService
+        from backend.models.approval import Approval
+
+        session_id = "co-tool-2"
+        cart = CartService.create_cart(db_session, session_id, 1)
+        CartService.add_item(db_session, cart.id, seed_data["p1"].id, quantity=2)  # over limit
+
+        registry = create_tool_registry()
+        result = await registry.execute("initiate_checkout", {}, db=db_session, session_id=session_id)
+        assert "approval_id" not in result
+        assert result["policy_allowed"] is False
+        assert db_session.query(Approval).filter(Approval.session_id == session_id).count() == 0
+
+    @pytest.mark.asyncio
+    async def test_agent_checkout_via_explicit_tool_call(self, db_session, seed_data):
         from backend.services.ai.agent import Agent
-        from backend.services.ai.llm_client import TextResponse
+        from backend.services.ai.llm_client import TextResponse, ToolCallResponse
         from backend.services.cart_service import CartService
         from backend.models.approval import Approval
 
@@ -183,19 +217,24 @@ class TestDeterministicCheckout:
         p1 = seed_data["p1"]
         CartService.add_item(db_session, cart.id, p1.id, quantity=1)
 
-        agent = Agent(_FakeLLMClient([TextResponse(text="Here is your summary.")]))
+        agent = Agent(_FakeLLMClient([
+            [ToolCallResponse("initiate_checkout", {}, "call_1")],
+            TextResponse(text="Here is your summary.")
+        ]))
         result = await agent.handle_message(db_session, session_id, "Yes, checkout please!")
 
-        assert agent.llm_client.calls == 1
         assert result["state"] == "AWAITING_APPROVAL"
         assert result["cart"]["approval_id"] > 0
+        assert result["cart"]["approval_token"]
         approval = db_session.query(Approval).filter(Approval.id == result["cart"]["approval_id"]).first()
         assert approval is not None
         assert approval.status == "pending"
         assert approval.requested_amount_paise == 449900
 
     @pytest.mark.asyncio
-    async def test_checkout_blocked_by_policy_creates_no_approval(self, db_session, seed_data):
+    async def test_ambiguous_yes_creates_no_approval(self, db_session, seed_data):
+        # "Yes, proceed" answering an upsell question must NOT mint an
+        # Approval - previously a regex misfire did exactly that.
         from backend.services.ai.agent import Agent
         from backend.services.ai.llm_client import TextResponse
         from backend.services.cart_service import CartService
@@ -204,13 +243,11 @@ class TestDeterministicCheckout:
         session_id = "checkout-intent-2"
         cart = CartService.create_cart(db_session, session_id, 1)
         p1 = seed_data["p1"]
-        CartService.add_item(db_session, cart.id, p1.id, quantity=2)  # over limit
+        CartService.add_item(db_session, cart.id, p1.id, quantity=1)
 
-        agent = Agent(_FakeLLMClient([TextResponse(text="Blocked, here is why.")]))
-        result = await agent.handle_message(db_session, session_id, "checkout now")
-
-        assert agent.llm_client.calls == 1
-        assert "approval_id" not in result["cart"]
+        agent = Agent(_FakeLLMClient([TextResponse(text="Socks added!")]))
+        result = await agent.handle_message(db_session, session_id, "yes, proceed")
+        assert "approval_id" not in (result["cart"] or {})
         assert db_session.query(Approval).filter(Approval.session_id == session_id).count() == 0
 
     @pytest.mark.asyncio
@@ -242,28 +279,78 @@ class TestDeterministicCheckout:
 
 
 class TestProductReasons:
+    def _rich_pair(self, db_session, merchant_id):
+        from backend.models import Product
+        a = Product(
+            merchant_id=merchant_id, name="Marathoner Pro", description="d",
+            category="Running Shoes", base_price_paise=449900,
+            tags=["running", "marathon", "lightweight"], is_active=True
+        )
+        b = Product(
+            merchant_id=merchant_id, name="Mud Master", description="d",
+            category="Trail Shoes", base_price_paise=549900,
+            tags=["trail", "rugged", "waterproof"], is_active=True
+        )
+        db_session.add_all([a, b])
+        db_session.commit()
+        return a, b
+
     @pytest.mark.asyncio
-    async def test_search_products_reason_stamped(self, db_session, seed_data):
+    async def test_search_reasons_differ_per_product(self, db_session, seed_data):
+        # One shared LLM sentence must NOT blanket every card, and reasons
+        # must never leak query mechanics ("matches 'x' in ...").
         from backend.services.ai.tool_registry import create_tool_registry
+        self._rich_pair(db_session, seed_data["merchant"].id)
         registry = create_tool_registry()
         result = await registry.execute(
             "search_products",
-            {"query": "running", "reason": "Under budget and built for marathons"},
+            {"query": "shoes", "reason": "A generic sentence for all"},
             db=db_session
         )
-        assert len(result) >= 1
-        for p in result:
-            assert p["reason"] == "Under budget and built for marathons"
+        assert len(result) >= 2
+        reasons = [p["reason"] for p in result]
+        assert all(r for r in reasons)
+        assert all("matches '" not in r for r in reasons)
+        assert len(set(reasons)) > 1  # distinct per product
 
     @pytest.mark.asyncio
-    async def test_search_products_reason_fallback(self, db_session, seed_data):
+    async def test_search_reason_describes_product(self, db_session, seed_data):
+        from backend.services.ai.tool_registry import create_tool_registry
+        self._rich_pair(db_session, seed_data["merchant"].id)
+        registry = create_tool_registry()
+        result = await registry.execute(
+            "search_products", {"query": "shoes"}, db=db_session
+        )
+        by_name = {p["name"]: p["reason"] for p in result}
+        # Product facts only: no query echo, no duplicated category words.
+        assert by_name["Marathoner Pro"] == "marathon, lightweight"
+        assert by_name["Mud Master"] == "rugged, waterproof"
+
+    @pytest.mark.asyncio
+    async def test_search_reason_budget_verdict(self, db_session, seed_data):
+        from backend.services.ai.tool_registry import create_tool_registry, search_reason_text
+        registry = create_tool_registry()
+        result = await registry.execute(
+            "search_products",
+            {"query": "running", "filters": {"max_price": 500000}},
+            db=db_session
+        )
+        by_name = {p["name"]: p["reason"] for p in result}
+        assert "under your" in by_name["RunPro Sprint"]
+        # Over-budget items are filtered out of listings, so the over-budget
+        # branch is covered directly against a pricier product.
+        p2 = seed_data["p2"]
+        assert "over your" in search_reason_text(p2, "running", {"max_price": 500000})
+
+    @pytest.mark.asyncio
+    async def test_search_llm_reason_used_without_signals(self, db_session, seed_data):
         from backend.services.ai.tool_registry import create_tool_registry
         registry = create_tool_registry()
         result = await registry.execute(
-            "search_products", {"query": "running"}, db=db_session
+            "search_products", {"reason": "Staff picks this week"}, db=db_session
         )
         assert len(result) >= 1
-        assert result[0]["reason"] == "Matched your search for 'running'"
+        assert all(p["reason"] == "Staff picks this week" for p in result)
 
     @pytest.mark.asyncio
     async def test_search_products_no_reason_without_query(self, db_session, seed_data):
@@ -321,7 +408,11 @@ class TestProductReasons:
         ]))
         result = await agent.handle_message(db_session, session_id, "running shoes")
 
-        assert result["products"][0]["reason"] == "Under your budget, built for distance"
+        # Search cards prefer per-product specifics; the shared call sentence
+        # only fills gaps (here the minimal seed tags leave gaps on purpose);
+        # upsell keeps the explicit reason.
+        assert all(p["reason"] for p in result["products"])
+        assert all("matches '" not in p["reason"] for p in result["products"])
         assert result["upsell_products"][0]["reason"] == "Stops blisters on long runs"
         event = db_session.query(AuditEvent).filter(
             AuditEvent.session_id == session_id,

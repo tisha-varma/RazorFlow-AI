@@ -15,6 +15,7 @@ class ApprovalOut(BaseModel):
     requested_amount_paise: int
     status: str
     summary_json: dict
+    approval_token: Optional[str] = None
     approved_at: Optional[datetime] = None
     created_at: datetime
 
@@ -24,6 +25,7 @@ class ApprovalOut(BaseModel):
 
 class ApprovalActionRequest(BaseModel):
     session_id: str
+    approval_token: str
 
 
 class PurchaseSummaryItem(BaseModel):

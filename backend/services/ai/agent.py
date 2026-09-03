@@ -12,15 +12,6 @@ from backend.services.state_machine import state_machine, SessionState
 from backend.models.ai_interaction import AIInteraction
 from backend.services.audit_service import AuditService
 
-# Checkout intent is detected deterministically by the orchestrator - the LLM
-# never calls an approval tool. The backend creates the Approval record itself.
-CHECKOUT_INTENT_RE = re.compile(
-    r"\b(checkout|check\s?out|buy\s+it|buy\s+now|place\s+(the\s+)?order|"
-    r"proceed\s+to\s+(checkout|payment)|confirm\s+(purchase|order)|pay\s+now|"
-    r"complete\s+(the\s+)?purchase|yes\s*,?\s*(buy|checkout|proceed))\b",
-    re.IGNORECASE
-)
-
 # Follow-up asking for alternatives to the last search. Handled without any
 # LLM call by re-querying with already-shown items excluded.
 MORE_OPTIONS_RE = re.compile(
@@ -47,40 +38,6 @@ class Agent:
         history = self._get_history(session_id)
         if len(history) > max_messages:
             self._history[session_id] = history[-max_messages:]
-
-    def _handle_checkout_intent(
-        self, db: Session, session_id: str, message: str
-    ) -> Dict[str, Any]:
-        """Detect checkout intent and create the Approval deterministically.
-
-        Returns {"status": "none"} when the message is not checkout intent,
-        {"status": "no_cart"} when there is nothing to check out,
-        {"status": "blocked", ...} when policy fails, or
-        {"status": "ready", ...} with the approval and totals.
-        """
-        if not CHECKOUT_INTENT_RE.search(message or ""):
-            return {"status": "none"}
-
-        from backend.services.cart_service import CartService
-        from backend.services.checkout_service import CheckoutService
-
-        cart = CartService.get_active_cart_by_session(db, session_id)
-        if not cart or not cart.items:
-            return {"status": "no_cart"}
-
-        result = CheckoutService.create_approval(db, session_id, cart.id)
-        if "approval" not in result:
-            return {
-                "status": "blocked",
-                "cart_id": cart.id,
-                "reason": result.get("policy_reason") or result.get("error")
-            }
-        return {
-            "status": "ready",
-            "cart_id": cart.id,
-            "approval": result["approval"],
-            "totals": result["totals"]
-        }
 
     def _remember_search(self, session_id: str, query: str, filters: dict | None) -> None:
         self._last_search[session_id] = {"query": query or "", "filters": filters or {}}
@@ -326,46 +283,10 @@ class Agent:
         # Work on a copy for the LLM call (tool results are per-iteration)
         messages = list(history)
 
-        # Deterministic checkout: if the customer confirmed the purchase,
-        # create the Approval record directly instead of spending LLM
-        # round trips on policy/summary/approval tool calls.
+        # No regex checkout detection: Approval creation happens ONLY when the
+        # LLM intentionally calls the initiate_checkout tool (see below).
+        # Ambiguous confirmations ("yes, add the socks") must never mint one.
         cart_data = None
-        checkout_context = self._handle_checkout_intent(db, session_id, message)
-        if checkout_context["status"] == "ready":
-            approval = checkout_context["approval"]
-            totals = checkout_context["totals"]
-            cart_data = {
-                "cart_id": checkout_context["cart_id"],
-                "approval_id": approval.id,
-                "status": "pending",
-                "item_count": totals["item_count"],
-                "total_paise": totals["total_paise"],
-                "items": totals["items"],
-                "policy_allowed": True,
-                "policy_reason": None
-            }
-            messages.append({
-                "role": "system",
-                "content": (
-                    f"The customer confirmed checkout. Approval #{approval.id} for "
-                    f"Rs.{totals['total_paise'] / 100:,.0f} was created automatically "
-                    f"({totals['item_count']} item(s)). Present the order summary "
-                    f"briefly and direct the customer to review and approve it in "
-                    f"the Commerce panel. Do NOT mention policy, summary, or "
-                    f"approval tools - they do not exist."
-                )
-            })
-        elif checkout_context["status"] == "blocked":
-            cart_data = {"cart_id": checkout_context.get("cart_id"), "policy_allowed": False}
-            messages.append({
-                "role": "system",
-                "content": (
-                    f"The customer asked to checkout, but the purchase is blocked "
-                    f"by policy: {checkout_context['reason']} Explain the reason "
-                    f"clearly and suggest alternatives (cheaper items, lower "
-                    f"quantity, or removing upsell items)."
-                )
-            })
 
         # Live cart truth on every turn: UI mutations bypass the agent,
         # so the model answers from the DB snapshot, never from memory.
@@ -452,7 +373,9 @@ class Agent:
                         if parsed["name"] == "search_products" and isinstance(result, list):
                             for p in result:
                                 if p["id"] not in {x["id"] for x in products_found}:
-                                    if call_reason:
+                                    # Search results already carry distinct
+                                    # per-product reasons; only fill gaps.
+                                    if call_reason and not p.get("reason"):
                                         p["reason"] = call_reason
                                     products_found.append(p)
                             self._remember_search(session_id, args.get("query", ""), args.get("filters"))
@@ -501,6 +424,19 @@ class Agent:
                         if parsed["name"] in ("create_cart", "add_to_cart", "remove_from_cart", "update_quantity"):
                             if isinstance(result, dict) and "cart_id" in result:
                                 cart_data = result
+                        if parsed["name"] == "initiate_checkout" and isinstance(result, dict):
+                            if result.get("approval_id"):
+                                cart_data = {
+                                    "cart_id": result.get("cart_id"),
+                                    "approval_id": result["approval_id"],
+                                    "approval_token": result.get("approval_token"),
+                                    "status": result.get("status", "pending"),
+                                    "item_count": result.get("item_count", 0),
+                                    "total_paise": result.get("total_paise", 0),
+                                    "items": result.get("items", []),
+                                    "policy_allowed": True,
+                                    "policy_reason": None
+                                }
                         if parsed["name"] == "add_to_cart" and isinstance(result, dict):
                             existing_ids = {p["id"] for p in upsell_products}
                             for p in result.get("related_products") or []:
@@ -546,7 +482,7 @@ class Agent:
                             existing_ids = {p["id"] for p in products_found}
                             for p in result:
                                 if p["id"] not in existing_ids:
-                                    if call_reason:
+                                    if call_reason and not p.get("reason"):
                                         p["reason"] = call_reason
                                     products_found.append(p)
                                     existing_ids.add(p["id"])
@@ -604,6 +540,23 @@ class Agent:
                         if resp.tool_name in ("create_cart", "add_to_cart", "remove_from_cart", "update_quantity"):
                             if isinstance(result, dict) and "cart_id" in result:
                                 cart_data = result
+
+                        # Explicit checkout: the LLM intentionally minted an
+                        # Approval - surface its id + single-use token so the
+                        # frontend can render the approval gate.
+                        if resp.tool_name == "initiate_checkout" and isinstance(result, dict):
+                            if result.get("approval_id"):
+                                cart_data = {
+                                    "cart_id": result.get("cart_id"),
+                                    "approval_id": result["approval_id"],
+                                    "approval_token": result.get("approval_token"),
+                                    "status": result.get("status", "pending"),
+                                    "item_count": result.get("item_count", 0),
+                                    "total_paise": result.get("total_paise", 0),
+                                    "items": result.get("items", []),
+                                    "policy_allowed": True,
+                                    "policy_reason": None
+                                }
 
                         # Automatic upsell: add_to_cart carries related items so
                         # the panel fills even without a get_related_products call.

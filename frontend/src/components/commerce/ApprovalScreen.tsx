@@ -41,6 +41,7 @@ interface Summary {
 
 interface ApprovalScreenProps {
   approvalId: number;
+  approvalToken?: string | null;
   sessionId: string;
   onApprove: () => void;
   onReject: () => void;
@@ -54,6 +55,7 @@ function formatPaise(paise: number): string {
 
 export default function ApprovalScreen({
   approvalId,
+  approvalToken,
   sessionId,
   onApprove,
   onReject,
@@ -85,12 +87,15 @@ export default function ApprovalScreen({
     setLoading(true);
     setError(null);
     try {
+      if (!approvalToken) {
+        throw new Error("Missing approval token — please checkout again to get a fresh approval.");
+      }
       const res = await fetch(
         `${API_BASE}/checkout/${action}/${approvalId}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ session_id: sessionId }),
+          body: JSON.stringify({ session_id: sessionId, approval_token: approvalToken }),
         }
       );
       if (!res.ok) {

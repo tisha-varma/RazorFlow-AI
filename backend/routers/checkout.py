@@ -18,6 +18,19 @@ def _require_transition(session_id: str, target: SessionState):
         )
 
 
+def _consume_approval_token(approval: Approval, req: ApprovalActionRequest):
+    """Single-use proof of browser possession. Wrong/missing/consumed
+    tokens are rejected before any state changes, so replays fail."""
+    import hmac
+    expected = approval.approval_token or ""
+    if not expected or not hmac.compare_digest(expected, req.approval_token or ""):
+        raise HTTPException(
+            status_code=403,
+            detail="Invalid or already-used approval token. Please checkout again."
+        )
+    approval.approval_token = None
+
+
 @router.get("/summary/{cart_id}", response_model=PurchaseSummary)
 def get_purchase_summary(cart_id: int, session_id: str, db: Session = Depends(get_db)):
     from backend.services.checkout_service import CheckoutService
@@ -93,6 +106,11 @@ def request_approval(req: ApprovalRequest, db: Session = Depends(get_db)):
 
 @router.post("/approve/{approval_id}", response_model=ApprovalOut)
 def approve_purchase(approval_id: int, req: ApprovalActionRequest, db: Session = Depends(get_db)):
+    from backend.services.checkout_service import CheckoutService
+    # Cold state machine (e.g. after a restart) must not 409 a live flow:
+    # recover the gate position from durable rows first.
+    CheckoutService.recover_session_state(db, req.session_id)
+
     approval = db.query(Approval).filter(Approval.id == approval_id).first()
     if not approval:
         raise HTTPException(status_code=404, detail="Approval not found")
@@ -100,6 +118,25 @@ def approve_purchase(approval_id: int, req: ApprovalActionRequest, db: Session =
         raise HTTPException(status_code=403, detail="Session mismatch")
     if approval.status != "pending":
         raise HTTPException(status_code=400, detail=f"Approval already {approval.status}")
+
+    _consume_approval_token(approval, req)
+
+    # The bound may have moved since this approval was created (merchant
+    # tightened policy mid-session). Re-check against the CURRENT policy -
+    # an approval is a snapshot, not a blank check.
+    from backend.services.policy_engine import PolicyEngine
+    from backend.models.policy import CommercePolicy
+    policy = db.query(CommercePolicy).filter(CommercePolicy.is_active == True).first()
+    if policy:
+        fresh = PolicyEngine.check_purchase_policy(
+            db, approval.cart_id, req.session_id, policy
+        )
+        if not fresh.allowed:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Policy no longer allows this purchase: {fresh.reason} "
+                "Please checkout again under the current limits.",
+            )
 
     _require_transition(req.session_id, SessionState.PAYMENT_PENDING)
 
@@ -131,6 +168,9 @@ def approve_purchase(approval_id: int, req: ApprovalActionRequest, db: Session =
 
 @router.post("/reject/{approval_id}", response_model=ApprovalOut)
 def reject_purchase(approval_id: int, req: ApprovalActionRequest, db: Session = Depends(get_db)):
+    from backend.services.checkout_service import CheckoutService
+    CheckoutService.recover_session_state(db, req.session_id)
+
     approval = db.query(Approval).filter(Approval.id == approval_id).first()
     if not approval:
         raise HTTPException(status_code=404, detail="Approval not found")
@@ -139,6 +179,7 @@ def reject_purchase(approval_id: int, req: ApprovalActionRequest, db: Session = 
     if approval.status != "pending":
         raise HTTPException(status_code=400, detail=f"Approval already {approval.status}")
 
+    _consume_approval_token(approval, req)
     _require_transition(req.session_id, SessionState.CART_BUILDING)
 
     approval.status = "rejected"

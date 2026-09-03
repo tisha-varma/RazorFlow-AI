@@ -163,6 +163,7 @@ Mirror the dashboard's webhook secret into `.env` as `RAZORPAY_WEBHOOK_SECRET`.
 | Audit | `GET /api/audit?session_id=…` |
 | Dashboard | `GET /api/dashboard/summary`, `GET /api/dashboard/funnel` |
 | Demo | `POST /api/demo/reset`, `POST /api/demo/run-successful-purchase`, `POST /api/demo/run-payment-failure`, `POST /api/demo/run-upsell-scenario` |
+| Agent protocol | `GET /.well-known/ai-commerce.json` — UAP-compatible machine-readable catalog, policy bounds, and purchase flow for external buyer agents |
 
 ## Testing
 

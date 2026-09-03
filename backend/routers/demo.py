@@ -56,19 +56,57 @@ def reset_demo(session_id: str | None = None, db: Session = Depends(get_db)):
     merchant = db.query(Merchant).first()
     merchant_id = merchant.id if merchant else 1
 
-    def scoped(query, model):
-        if session_id and hasattr(model, "session_id"):
-            return query.filter(model.session_id == session_id)
-        if hasattr(model, "merchant_id"):
-            return query.filter(model.merchant_id == merchant_id)
-        return query
+    # Resolve the in-scope parents FIRST, then delete strictly by those ids.
+    # (A blanket model-wide delete here once wiped every order item and
+    # payment in the database - never again.)
+    if session_id:
+        cart_ids = [c.id for c in db.query(Cart.id).filter(
+            Cart.session_id == session_id).all()]
+        order_ids = [o.id for o in db.query(Order.id).filter(
+            Order.session_id == session_id).all()]
+    else:
+        cart_ids = [c.id for c in db.query(Cart.id).filter(
+            Cart.merchant_id == merchant_id).all()]
+        order_ids = [o.id for o in db.query(Order.id).filter(
+            Order.merchant_id == merchant_id).all()]
 
     counts = {}
-    for model in (CartItem, Cart, OrderItem, Order, Approval, AuditEvent,
-                  AIInteraction, RazorpayPayment, SessionStateEvent):
-        q = scoped(db.query(model), model)
-        # Child rows first where FKs demand it (items before parents).
-        counts[model.__tablename__] = q.delete(synchronize_session=False)
+    counts["cart_items"] = db.query(CartItem).filter(
+        CartItem.cart_id.in_(cart_ids)).delete(synchronize_session=False) if cart_ids else 0
+    counts["order_items"] = db.query(OrderItem).filter(
+        OrderItem.order_id.in_(order_ids)).delete(synchronize_session=False) if order_ids else 0
+    counts["razorpay_payments"] = db.query(RazorpayPayment).filter(
+        RazorpayPayment.order_id.in_(order_ids)).delete(synchronize_session=False) if order_ids else 0
+
+    def _scope_event(query, model):
+        if session_id:
+            return query.filter(model.session_id == session_id)
+        if hasattr(model, "merchant_id"):
+            return query.filter(
+                (model.merchant_id == merchant_id) | (model.merchant_id.is_(None))
+            )
+        return query
+
+    approval_q = db.query(Approval)
+    if session_id:
+        approval_q = approval_q.filter(Approval.session_id == session_id)
+    elif cart_ids:
+        approval_q = approval_q.filter(Approval.cart_id.in_(cart_ids))
+    else:
+        approval_q = approval_q.filter(False)
+    counts["approvals"] = approval_q.delete(synchronize_session=False)
+
+    counts["carts"] = db.query(Cart).filter(
+        Cart.id.in_(cart_ids)).delete(synchronize_session=False) if cart_ids else 0
+    counts["orders"] = db.query(Order).filter(
+        Order.id.in_(order_ids)).delete(synchronize_session=False) if order_ids else 0
+
+    counts["audit_events"] = _scope_event(db.query(AuditEvent), AuditEvent).delete(
+        synchronize_session=False)
+    counts["ai_interactions"] = _scope_event(db.query(AIInteraction), AIInteraction).delete(
+        synchronize_session=False)
+    counts["session_state_events"] = _scope_event(
+        db.query(SessionStateEvent), SessionStateEvent).delete(synchronize_session=False)
     db.commit()
 
     # Restore the default active policy (upsert, single source of defaults).

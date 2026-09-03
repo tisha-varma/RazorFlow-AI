@@ -2,7 +2,7 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.config import settings
 from backend.services.rate_limit import limit
-from backend.routers import catalog, policy, cart, agent, checkout, payment, audit, dashboard, demo
+from backend.routers import catalog, policy, cart, agent, checkout, payment, audit, dashboard, demo, well_known
 
 app = FastAPI(
     title="RazorFlow AI Backend API",
@@ -36,6 +36,7 @@ app.include_router(
 app.include_router(audit.router, prefix="/api")
 app.include_router(dashboard.router, prefix="/api")
 app.include_router(demo.router, prefix="/api")
+app.include_router(well_known.router)  # RFC 8615 root path, no /api prefix
 
 @app.on_event("startup")
 def _wire_state_recorder():

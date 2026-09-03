@@ -2,6 +2,34 @@ from typing import List, Dict, Any, Callable
 from backend.services.ai.llm_client import ToolDefinition
 
 
+def search_reason_text(product, query="", filters=None, llm_reason=None):
+    """Per-product reason describing the PRODUCT (never the query mechanics),
+    so cards never share one generic sentence. Budget verdict + distinctive
+    tags - facts from the catalog row, anchored to this search. Without any
+    search signal the LLM line (or nothing) is more honest than a guess."""
+    try:
+        max_price = int((filters or {}).get("max_price"))
+    except (TypeError, ValueError):
+        max_price = None
+    if not (query or "").strip() and not max_price:
+        return (llm_reason or "").strip() or None
+    bits = []
+    if max_price:
+        price = f"₹{product.base_price_paise / 100:,.0f}"
+        budget = f"₹{max_price / 100:,.0f}"
+        if product.base_price_paise <= max_price:
+            bits.append(f"{price} under your {budget} budget")
+        else:
+            bits.append(f"{price} over your {budget} budget")
+    # Distinctive tags only: skip words already in the query or category
+    # ("Trail Shoes · trail, shoes" helps nobody).
+    stop = set((query or "").lower().split()) | set((product.category or "").lower().split())
+    distinctive = [t for t in (product.tags or []) if t and t.lower() not in stop][:2]
+    if distinctive:
+        bits.append(", ".join(distinctive))
+    return " · ".join(bits) or (llm_reason or "").strip() or None
+
+
 class ToolRegistry:
     def __init__(self):
         self._tools: Dict[str, dict] = {}
@@ -69,9 +97,9 @@ def create_tool_registry() -> ToolRegistry:
             in_stock=filters.get("in_stock"),
             limit=10
         )
-        # Prefer the LLM's own one-sentence reason; fall back to a truthful
-        # deterministic statement derived from the query itself.
-        fallback = f"Matched your search for '{query}'" if (query or "").strip() else None
+        # Per-product specifics first (always distinct per card); the LLM's
+        # sentence only fills in when no signal exists (e.g. empty browse).
+        llm_reason = (reason or "").strip() or None
         return [
             {
                 "id": p.id,
@@ -82,7 +110,7 @@ def create_tool_registry() -> ToolRegistry:
                 "image_url": p.image_url,
                 "tags": p.tags or [],
                 "in_stock": any(v.stock_quantity > 0 for v in p.variants) if p.variants else False,
-                "reason": (reason or "").strip() or fallback
+                "reason": search_reason_text(p, query, filters, llm_reason)
             }
             for p in products
         ]
@@ -99,7 +127,7 @@ def create_tool_registry() -> ToolRegistry:
                 },
                 "reason": {
                     "type": "string",
-                    "description": "REQUIRED: one sentence explaining why these results fit the customer's stated need (budget, use case, or feature match). Shown on the product card."
+                    "description": "Optional one-sentence note on the results. Per-card reasons are built automatically from match + budget signals; this is only used when no signal exists."
                 },
                 "filters": {
                     "type": "object",
@@ -287,10 +315,12 @@ def create_tool_registry() -> ToolRegistry:
         handler=create_cart
     )
 
-    # NOTE: calculate_cart, check_purchase_policy, generate_purchase_summary,
-    # and request_payment_approval are intentionally NOT LLM tools. Totals and
-    # policy checks run automatically inside every cart mutation, and approvals
-    # are created deterministically by CheckoutService on checkout intent.
+    # NOTE: calculate_cart, check_purchase_policy, and generate_purchase_summary
+    # are intentionally NOT LLM tools. Totals and policy checks run
+    # automatically inside every cart mutation. Checkout itself IS an explicit
+    # LLM tool (initiate_checkout): the model calls it only when the customer
+    # has confirmed purchase intent, so Approval creation is LLM-intentional,
+    # never regex-triggered.
 
     def _public_payload(payload: dict) -> dict:
         """Strip the ORM object before returning a payload to the LLM."""
@@ -419,6 +449,64 @@ def create_tool_registry() -> ToolRegistry:
             "required": ["product_id"]
         },
         handler=add_to_cart
+    )
+
+    # Tool: initiate_checkout - the ONLY way an Approval comes into existence.
+    # Called by the LLM when (and only when) the customer confirms they want
+    # to buy the current cart. Runs policy deterministically, then creates
+    # the pending Approval. The human still approves it in the UI.
+    async def initiate_checkout(db=None, session_id="", cart_id=0):
+        from backend.services.cart_service import CartService
+        from backend.services.checkout_service import CheckoutService
+        try:
+            cart_id = int(cart_id) if cart_id else 0
+        except (ValueError, TypeError):
+            cart_id = 0
+        cart_obj = CartService.get_cart(db, cart_id) if cart_id else None
+        if not cart_obj and session_id:
+            cart_obj = CartService.get_active_cart_by_session(db, session_id)
+        if not cart_obj:
+            return {"error": "No active cart to check out"}
+        result = CheckoutService.create_approval(db, session_id, cart_obj.id)
+        if "approval" not in result:
+            return {
+                "error": result.get("policy_reason") or result.get("error"),
+                "policy_allowed": False,
+                "cart_id": cart_obj.id
+            }
+        approval = result["approval"]
+        totals = result["totals"]
+        return {
+            "approval_id": approval.id,
+            "approval_token": approval.approval_token,
+            "status": approval.status,
+            "cart_id": cart_obj.id,
+            "item_count": totals["item_count"],
+            "total_paise": totals["total_paise"],
+            "items": totals["items"],
+            "policy_allowed": True
+        }
+
+    registry.register(
+        name="initiate_checkout",
+        description=(
+            "Start checkout for the session's cart. Call ONLY when the customer "
+            "has explicitly confirmed they want to buy (e.g. 'yes, checkout', "
+            "'place the order'). NEVER call it to acknowledge an upsell or answer "
+            "a question - 'yes, add the socks' means add_to_cart, not checkout. "
+            "Creates the pending Approval; the customer approves it in the UI."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "cart_id": {
+                    "type": "integer",
+                    "description": "The cart ID (optional - defaults to the session's active cart)"
+                }
+            },
+            "required": []
+        },
+        handler=initiate_checkout
     )
 
     # Tool 7: remove_from_cart (totals + policy check included automatically)

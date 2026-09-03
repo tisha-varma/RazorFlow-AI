@@ -1,7 +1,10 @@
+import uuid
+
 from sqlalchemy.orm import Session
 from typing import Dict, Any
 
 from backend.models.approval import Approval
+from backend.models.order import Order
 from backend.models.policy import CommercePolicy
 from backend.models.merchant import Merchant
 from backend.services.cart_service import CartService
@@ -42,6 +45,40 @@ class CheckoutService:
                 break
         # Fallback: guarantee the gate engages.
         state_machine._sessions[session_id] = SessionState.AWAITING_APPROVAL
+
+    @staticmethod
+    def recover_session_state(db: Session, session_id: str) -> SessionState | None:
+        """Restore in-memory state from durable rows after a restart.
+
+        The state machine is volatile; approvals and orders are not. When the
+        machine has no record (IDLE) but the DB shows a live gate, reset to
+        the matching state so strict transitions (approve/reject) don't 409
+        on a flow that is actually mid-flight. Returns the recovered state,
+        or None when there was nothing to recover.
+        """
+        if state_machine.get_state(session_id) != SessionState.IDLE:
+            return None
+        pending = db.query(Approval).filter(
+            Approval.session_id == session_id,
+            Approval.status == "pending"
+        ).first()
+        if pending:
+            state_machine._sessions[session_id] = SessionState.AWAITING_APPROVAL
+            return SessionState.AWAITING_APPROVAL
+        approved_unpaid = (
+            db.query(Approval.id)
+            .join(Order, Order.id == Approval.order_id)
+            .filter(
+                Approval.session_id == session_id,
+                Approval.status == "approved",
+                Order.status != "paid"
+            )
+            .first()
+        )
+        if approved_unpaid:
+            state_machine._sessions[session_id] = SessionState.PAYMENT_PENDING
+            return SessionState.PAYMENT_PENDING
+        return None
 
     @staticmethod
     def create_approval(db: Session, session_id: str, cart_id: int) -> Dict[str, Any]:
@@ -112,21 +149,44 @@ class CheckoutService:
                 related_entity_id=cart_id
             )
 
-        # Reuse an existing pending approval instead of duplicating it.
+        # Reuse an existing pending approval ONLY if it still matches the
+        # live cart total. A mutated cart (e.g. upsell added after the first
+        # checkout intent) must never pay a frozen stale amount.
         existing = db.query(Approval).filter(
             Approval.cart_id == cart_id,
             Approval.session_id == session_id,
             Approval.status == "pending"
         ).first()
         if existing:
-            CheckoutService._advance_to_awaiting_approval(session_id)
-            return {
-                "approval": existing,
-                "reused": True,
-                "policy_allowed": True,
-                "policy_reason": None,
-                "totals": totals
-            }
+            if existing.requested_amount_paise != totals["total_paise"]:
+                existing.status = "expired"
+                db.commit()
+                _merchant = db.query(Merchant).first()
+                AuditService.log_event(
+                    db=db,
+                    event_type="PAYMENT_APPROVAL_EXPIRED",
+                    actor="system",
+                    merchant_id=_merchant.id if _merchant else 1,
+                    session_id=session_id,
+                    event_data={
+                        "approval_id": existing.id,
+                        "cart_id": cart_id,
+                        "old_amount_paise": existing.requested_amount_paise,
+                        "new_amount_paise": totals["total_paise"],
+                        "reason": "cart changed since approval was created"
+                    },
+                    related_entity_type="approval",
+                    related_entity_id=existing.id
+                )
+            else:
+                CheckoutService._advance_to_awaiting_approval(session_id)
+                return {
+                    "approval": existing,
+                    "reused": True,
+                    "policy_allowed": True,
+                    "policy_reason": None,
+                    "totals": totals
+                }
 
         merchant = db.query(Merchant).first()
         merchant_id = merchant.id if merchant else 1
@@ -136,6 +196,7 @@ class CheckoutService:
             cart_id=cart_id,
             requested_amount_paise=totals["total_paise"],
             status="pending",
+            approval_token=uuid.uuid4().hex,
             summary_json={
                 "items": totals["items"],
                 "subtotal_paise": totals["subtotal_paise"],

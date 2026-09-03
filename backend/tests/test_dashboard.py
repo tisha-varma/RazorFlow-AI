@@ -24,16 +24,20 @@ def _seed_orders(db_session, seed_data):
             total_paise=product.base_price_paise * qty, is_upsell=upsell
         ))
 
-    yesterday = datetime.now() - timedelta(days=1)
+    # Explicit timestamps on the SAME clock the endpoint uses for its
+    # "today" boundary (DB server_default is UTC, app uses local time -
+    # mixing them flakes near midnight).
+    now = datetime.now()
+    yesterday = now - timedelta(days=2)
 
     o1 = Order(order_number="DASH-1", merchant_id=merchant.id, customer_id="c",
                session_id="dash-s0", cart_id=carts[0].id, subtotal_paise=449900,
                total_paise=449900, status="paid", is_ai_assisted=True,
-               upsell_revenue_paise=0)
+               upsell_revenue_paise=0, created_at=now)
     o2 = Order(order_number="DASH-2", merchant_id=merchant.id, customer_id="c",
                session_id="dash-s1", cart_id=carts[1].id, subtotal_paise=499800,
                total_paise=499800, status="paid", is_ai_assisted=True,
-               upsell_revenue_paise=49900)
+               upsell_revenue_paise=49900, created_at=now)
     o3 = Order(order_number="DASH-3", merchant_id=merchant.id, customer_id="c",
                session_id="dash-s2", cart_id=carts[2].id, subtotal_paise=299900,
                total_paise=299900, status="paid", is_ai_assisted=False,

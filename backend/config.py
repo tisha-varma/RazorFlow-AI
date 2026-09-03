@@ -23,8 +23,9 @@ class Settings(BaseSettings):
     # to hide them as you would in a production view.
     DEMO_MODE: bool = True
 
-    # Database
-    DATABASE_URL: str = "sqlite:///./razorflow.db"
+    # Database: absolute path anchored to the backend package so the DB file
+    # never depends on the process working directory again.
+    DATABASE_URL: str = f"sqlite:///{(_backend_dir / 'razorflow.db').as_posix()}"
 
     # CORS Origins
     CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:3001", "http://127.0.0.1:3000"]

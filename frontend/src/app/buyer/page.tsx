@@ -20,6 +20,7 @@ export default function BuyerPage() {
   const [cart, setCart] = useState<Cart | null>(null);
   const [policyActive, setPolicyActive] = useState(false);
   const [approvalId, setApprovalId] = useState<number | null>(null);
+  const [approvalToken, setApprovalToken] = useState<string | null>(null);
   const [approvedId, setApprovedId] = useState<number | null>(null);
   const [showAudit, setShowAudit] = useState(false);
   const chatRef = useRef<{ sendMessage: (msg: string) => void } | null>(null);
@@ -141,12 +142,18 @@ export default function BuyerPage() {
     }
   }, []);
 
+  const handleApprovalNeeded = useCallback((id: number, token?: string | null) => {
+    setApprovalId(id);
+    setApprovalToken(token ?? null);
+  }, []);
+
   const handleApprovalComplete = useCallback(() => {
     // Approve path: move the approval into the payment step.
     setApprovalId((current) => {
       if (current) setApprovedId(current);
       return null;
     });
+    setApprovalToken(null);
     if (chatRef.current) {
       chatRef.current.sendMessage("Approval completed");
     }
@@ -155,6 +162,7 @@ export default function BuyerPage() {
   const handleApprovalRejected = useCallback(() => {
     // Reject path: clear the gate, no payment step.
     setApprovalId(null);
+    setApprovalToken(null);
     if (chatRef.current) {
       chatRef.current.sendMessage("I rejected the purchase");
     }
@@ -277,7 +285,7 @@ export default function BuyerPage() {
             onProductsFound={setProducts}
             onUpsellFound={setUpsellProducts}
             onCartUpdate={setCart}
-            onApprovalNeeded={setApprovalId}
+            onApprovalNeeded={handleApprovalNeeded}
           />
         </div>
         <div className="w-1/2 min-w-0">
@@ -286,6 +294,7 @@ export default function BuyerPage() {
             cart={cart}
             upsellProducts={visibleUpsell}
             approvalId={approvalId}
+            approvalToken={approvalToken}
             approvedId={approvedId}
             sessionId={sessionId || ""}
             onAddToCart={handleAddToCart}

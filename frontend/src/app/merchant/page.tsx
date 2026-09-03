@@ -209,9 +209,16 @@ export default function MerchantPage() {
 
         <FunnelChart stages={funnel} />
 
-        <div className="grid gap-4 lg:grid-cols-5">
+        {/* Audit trail — full width, recent actions on top */}
+        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="h-[440px]">
+            <AuditTrail merchantId={1} />
+          </div>
+        </div>
+
+        <div className="grid gap-4">
           {/* Orders table */}
-          <div className="rounded-xl border border-slate-200 bg-white shadow-sm lg:col-span-3">
+          <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
             <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
               <TrendingUp className="h-4 w-4 text-slate-500" aria-hidden="true" />
               <h2 className="text-sm font-semibold text-slate-900">Recent orders</h2>
@@ -276,12 +283,6 @@ export default function MerchantPage() {
             </div>
           </div>
 
-          {/* Audit trail */}
-          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm lg:col-span-2">
-            <div className="h-[420px]">
-              <AuditTrail merchantId={1} />
-            </div>
-          </div>
         </div>
 
         <p className="text-xs text-slate-400" title={summary?.conversion_note}>

@@ -256,7 +256,9 @@ export function AuditTrail({ sessionId, merchantId, refreshKey }: AuditTrailProp
     try {
       const res = await fetch(`${API_BASE}/audit?${params.toString()}`);
       if (!res.ok) throw new Error("Could not load audit trail");
-      setEvents(await res.json());
+      const rows: AuditEvent[] = await res.json();
+      // Newest first: recent actions on top, no scrolling to find them.
+      setEvents([...rows].reverse());
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load audit trail");
@@ -281,6 +283,7 @@ export function AuditTrail({ sessionId, merchantId, refreshKey }: AuditTrailProp
         <h3 className="text-[13px] font-semibold uppercase tracking-wider text-slate-600">
           Audit trail
         </h3>
+        <span className="text-[11px] text-slate-400">newest first</span>
         <Badge variant="outline" className="border-slate-300 text-[11px] tabular-nums text-slate-600 bg-slate-50">
           {events.length}
         </Badge>

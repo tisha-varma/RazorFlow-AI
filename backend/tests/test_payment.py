@@ -21,7 +21,8 @@ def _approved_approval(client, seed_data, session_id):
         json={"cart_id": cart["id"], "session_id": session_id},
     ).json()
     appr = client.post(
-        f"/api/checkout/approve/{appr['id']}", json={"session_id": session_id}
+        f"/api/checkout/approve/{appr['id']}",
+        json={"session_id": session_id, "approval_token": appr["approval_token"]}
     ).json()
     assert appr["status"] == "approved"
     return appr, cart
@@ -353,7 +354,10 @@ class TestEndToEndAuditChain:
         assert result["state"] == "AWAITING_APPROVAL"
         approval_id = result["cart"]["approval_id"]
 
-        client.post(f"/api/checkout/approve/{approval_id}", json={"session_id": session_id})
+        client.post(f"/api/checkout/approve/{approval_id}", json={
+            "session_id": session_id,
+            "approval_token": result["cart"]["approval_token"]
+        })
 
         from backend.services import payment_service as ps
         monkeypatch.setattr(
@@ -421,6 +425,8 @@ class _FakeLLM:
                 return [ToolCallResponse(
                     "add_to_cart", {"cart_id": 0, "product_id": self.product_id}, "c2"
                 )]
+            if "checkout please" in last_user:
+                return [ToolCallResponse("initiate_checkout", {}, "c3")]
         return TextResponse(text="Done.")
 
 

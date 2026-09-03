@@ -61,6 +61,24 @@ class TestCatalogEndpoints:
         related = resp.json()
         assert len(related) >= 1
 
+    def test_well_known_manifest(self, client, seed_data):
+        resp = client.get("/.well-known/ai-commerce.json")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["protocol"] == "ai-commerce/1.0"
+        assert data["uap_compatible"] is True
+        assert data["catalog"]["product_count"] >= 3
+        assert "Running Shoes" in data["catalog"]["categories"]
+        by_name = {p["name"]: p for p in data["catalog"]["products"]}
+        assert by_name["RunPro Sprint"]["price_paise"] == 449900
+        assert by_name["RunPro Sprint"]["currency"] == "INR"
+        assert any(by_name["RunPro Sprint"]["related_ids"])
+        policy = data["policy"]
+        assert policy["spending_limit_paise"] == 1000000
+        assert policy["require_approval"] is True
+        assert "paise" in policy["unit"]
+        assert "approval" in " ".join(data["purchase_flow"]["steps"]).lower()
+
     def test_get_related_falls_back_without_explicit_links(self, client, seed_data, db_session):
         from backend.models import Product
         merchant_id = seed_data["merchant"].id

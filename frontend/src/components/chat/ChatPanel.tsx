@@ -22,7 +22,7 @@ interface ChatPanelProps {
   onProductsFound?: (products: Product[]) => void;
   onUpsellFound?: (products: Product[]) => void;
   onCartUpdate?: (cart: Cart) => void;
-  onApprovalNeeded?: (approvalId: number) => void;
+  onApprovalNeeded?: (approvalId: number, approvalToken?: string | null) => void;
 }
 
 export interface ChatPanelHandle {
@@ -105,7 +105,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
         // Check for approval state
         if (data.state === "AWAITING_APPROVAL" && data.cart?.approval_id) {
-          onApprovalNeeded?.(data.cart.approval_id);
+          onApprovalNeeded?.(data.cart.approval_id, data.cart.approval_token ?? null);
         }
       } catch (error) {
         setActivity(null);

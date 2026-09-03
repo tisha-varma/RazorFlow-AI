@@ -172,6 +172,37 @@ def create_order(approval_id: int, req: CreateOrderRequest, db: Session = Depend
     if not cart:
         raise HTTPException(status_code=404, detail="Cart not found")
 
+    # Stale-approval gate: the cart may have changed since approval (second
+    # tab, API call, minutes passing). Never create a Razorpay order for a
+    # frozen amount that no longer matches the live cart.
+    from backend.services.cart_service import CartService
+    from backend.services.policy_engine import PolicyEngine
+    from backend.models.policy import CommercePolicy
+    live = CartService.calculate_totals(db, cart.id)
+    live_total = live["total_paise"] if live else None
+    if live_total is None or live_total != int(approval.requested_amount_paise):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Cart changed since approval "
+                f"(approved ₹{int(approval.requested_amount_paise) / 100:,.0f}, "
+                f"cart now ₹{(live_total or 0) / 100:,.0f}). "
+                "Please checkout again to re-approve the current total."
+            ),
+        )
+
+    # Policy re-check at money time: session spending may have moved since
+    # approval (e.g. a second order paid in another tab).
+    policy = db.query(CommercePolicy).filter(CommercePolicy.is_active == True).first()
+    if policy:
+        fresh = PolicyEngine.check_purchase_policy(db, cart.id, req.session_id, policy)
+        if not fresh.allowed:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Policy no longer allows this purchase: {fresh.reason} "
+                "Please review the cart and re-approve.",
+            )
+
     summary = approval.summary_json or {}
     subtotal = int(summary.get("subtotal_paise", approval.requested_amount_paise))
     upsell_total = int(summary.get("upsell_total_paise", 0))
