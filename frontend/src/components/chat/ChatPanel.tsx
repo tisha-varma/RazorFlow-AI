@@ -86,24 +86,16 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
         setMessages((prev) => [...prev, assistantMessage]);
 
-        // Accumulate products
+        // Latest turn wins: the panel shows what the agent just talked
+        // about, not everything ever mentioned. Empty turns keep the list.
         if (data.products && data.products.length > 0) {
-          const existingIds = new Set(accumulatedProducts.current.map((p) => p.id));
-          const newProducts = data.products.filter((p: Product) => !existingIds.has(p.id));
-          if (newProducts.length > 0) {
-            accumulatedProducts.current = [...accumulatedProducts.current, ...newProducts];
-            onProductsFound?.(accumulatedProducts.current);
-          }
+          accumulatedProducts.current = data.products;
+          onProductsFound?.(accumulatedProducts.current);
         }
 
-        // Accumulate upsell products
         if (data.upsell_products && data.upsell_products.length > 0) {
-          const existingIds = new Set(accumulatedUpsell.current.map((p) => p.id));
-          const newUpsell = data.upsell_products.filter((p: Product) => !existingIds.has(p.id));
-          if (newUpsell.length > 0) {
-            accumulatedUpsell.current = [...accumulatedUpsell.current, ...newUpsell];
-            onUpsellFound?.(accumulatedUpsell.current);
-          }
+          accumulatedUpsell.current = data.upsell_products;
+          onUpsellFound?.(accumulatedUpsell.current);
         }
 
         // Fetch full cart
@@ -142,21 +134,21 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     };
 
     return (
-      <div className="flex flex-col h-full bg-slate-900/40 border-r border-slate-800">
-        <div className="border-b border-slate-800 px-4 py-3 flex items-center gap-2">
-          <Sparkles className="h-4 w-4 text-blue-400" />
-          <h2 className="text-sm font-semibold text-white">SprintGear AI</h2>
-          <Badge variant="outline" className="text-xs border-blue-500/30 text-blue-400 bg-blue-950/20 ml-auto">
+      <div className="flex flex-col h-full bg-white border-r border-slate-200">
+        <div className="border-b border-slate-200 px-4 py-3 flex items-center gap-2 bg-white">
+          <Sparkles className="h-4 w-4 text-indigo-600" aria-hidden="true" />
+          <h2 className="text-[15px] font-semibold text-slate-900">SprintGear AI</h2>
+          <Badge variant="outline" className="text-xs border-emerald-200 text-emerald-700 bg-emerald-50 ml-auto">
             Online
           </Badge>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-stone-50">
           {messages.length === 0 && (
-            <div className="flex flex-col items-center justify-center h-full text-center text-slate-500">
-              <Sparkles className="h-8 w-8 mb-3 text-slate-600" />
-              <p className="text-sm">Ask about running shoes, trail gear, or accessories.</p>
-              <p className="text-xs mt-1 text-slate-600">Example: "I need marathon shoes under ₹5,000"</p>
+            <div className="flex flex-col items-center justify-center h-full text-center">
+              <Sparkles className="h-8 w-8 mb-3 text-slate-300" aria-hidden="true" />
+              <p className="text-[15px] font-medium text-slate-700">Ask about running shoes, trail gear, or accessories.</p>
+              <p className="text-[13px] mt-1.5 text-slate-500">Example: "I need marathon shoes under ₹5,000"</p>
             </div>
           )}
 
@@ -169,7 +161,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
           <div ref={messagesEndRef} />
         </div>
 
-        <div className="border-t border-slate-800 p-4">
+        <div className="border-t border-slate-200 bg-white p-4">
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -177,20 +169,26 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
             }}
             className="flex gap-2"
           >
+            <label htmlFor="chat-input" className="sr-only">
+              Ask about products
+            </label>
             <Input
+              id="chat-input"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask about products..."
+              placeholder="Ask about products…"
               disabled={loading}
-              className="bg-slate-800 border-slate-700 text-white placeholder:text-slate-500"
+              autoComplete="off"
+              className="bg-white border-slate-300 text-slate-900 text-[14px] placeholder:text-slate-400 focus-visible:ring-indigo-500"
             />
             <Button
               type="submit"
               disabled={loading || !input.trim()}
               size="icon"
-              className="bg-blue-600 hover:bg-blue-500 text-white shrink-0"
+              aria-label="Send message"
+              className="bg-indigo-600 hover:bg-indigo-500 text-white shrink-0 touch-manipulation"
             >
-              <Send className="h-4 w-4" />
+              <Send className="h-4 w-4" aria-hidden="true" />
             </Button>
           </form>
         </div>

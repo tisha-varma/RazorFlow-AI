@@ -17,13 +17,16 @@ def cart_with_names(
     policy_reason: Optional[str] = None
 ) -> dict:
     """Add product names to cart items."""
-    # Fetch product names in bulk
+    # Fetch product names + images in bulk
     product_ids = [item.product_id for item in cart.items]
-    products = {p.id: p.name for p in db.query(Product).filter(Product.id.in_(product_ids)).all()} if product_ids else {}
+    products = {
+        p.id: p for p in db.query(Product).filter(Product.id.in_(product_ids)).all()
+    } if product_ids else {}
 
     items = []
     for item in cart.items:
-        product_name = products.get(item.product_id, f"Product #{item.product_id}")
+        prod = products.get(item.product_id)
+        product_name = prod.name if prod else f"Product #{item.product_id}"
         items.append({
             "id": item.id,
             "cart_id": item.cart_id,
@@ -33,6 +36,7 @@ def cart_with_names(
             "unit_price_paise": item.unit_price_paise,
             "is_upsell": item.is_upsell,
             "product_name": product_name,
+            "image_url": prod.image_url if prod else None,
             "created_at": item.created_at
         })
 

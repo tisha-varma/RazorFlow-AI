@@ -68,6 +68,10 @@ def _mark_order_paid(
     db.commit()
     db.refresh(order)
 
+    # Recover through PAYMENT_PENDING first when retrying after a failure,
+    # so the SUCCESS -> CONFIRMED chain stays on valid graph edges.
+    if state_machine.get_state(order.session_id) == SessionState.PAYMENT_FAILED:
+        _set_state_best_effort(order.session_id, SessionState.PAYMENT_PENDING)
     _set_state_best_effort(order.session_id, SessionState.PAYMENT_SUCCESS)
     _set_state_best_effort(order.session_id, SessionState.ORDER_CONFIRMED)
 

@@ -129,7 +129,15 @@ razorflow-ai/
 
 ## Known Limitations
 
-*None yet — will document any cuts here.*
+- **Single hard-coded merchant (id 1).** Multi-merchant isolation, onboarding, and per-merchant keys are not implemented.
+- **In-memory session state.** The state machine and agent history live in process memory — a backend restart loses conversation state and state-machine position (the DB rows survive).
+- **SQLite + local file DB.** Fine for demo scale; no migrations (schema changes need a fresh `init_db.py` run), no concurrency hardening.
+- **Groq free-tier quotas.** 5 rotating test keys share ~200K tokens/day; heavy demoing can exhaust them and the chat degrades to error messages until reset.
+- **Razorpay test mode only.** Live keys, refunds, settlements, and dispute handling are not wired. Webhook delivery needs a public tunnel (ngrok/cloudflared) in local dev.
+- **Light theme covers the buyer + merchant flows only.** The landing (`/`) and setup (`/setup`) pages are still dark.
+- **No auth.** Buyer sessions are unsecured localStorage IDs; the merchant console has no login.
+- **Upsell fallback is rule-based (tags), not personalized.** Explicit merchant relations win; everything else matches on shared tags.
+- **Product photos are static seed assets**, not merchant-uploaded; catalog uploads don't attach images.
 
 ## Phase 2 Completion Summary
 

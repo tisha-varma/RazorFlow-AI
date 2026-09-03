@@ -42,6 +42,7 @@ export interface CartItem {
   unit_price_paise: number;
   is_upsell: boolean;
   product_name: string;
+  image_url?: string | null;
   created_at: string;
   product?: Product;
   variant?: ProductVariant;

@@ -25,6 +25,46 @@ def get_active_policy(
         )
     return policy
 
+@router.get("/session-usage")
+def get_session_usage(
+    session_id: str,
+    merchant_id: int = Query(1, description="Hardcoded merchant ID for demo"),
+    db: Session = Depends(get_db)
+):
+    """Live spending context for the persistent limit bar.
+
+    used = already-paid session spend + active cart total (committed funds).
+    """
+    from backend.services.cart_service import CartService
+
+    policy = db.query(CommercePolicy).filter(
+        CommercePolicy.merchant_id == merchant_id,
+        CommercePolicy.is_active == True
+    ).first()
+    if not policy:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active commerce policy found."
+        )
+
+    spent = PolicyEngine.get_session_total_spent(db, session_id)
+    cart = CartService.get_active_cart_by_session(db, session_id)
+    cart_total = 0
+    if cart:
+        totals = CartService.calculate_totals(db, cart.id)
+        cart_total = totals["total_paise"] if totals else 0
+
+    used = spent + cart_total
+    return {
+        "session_id": session_id,
+        "spending_limit_paise": policy.spending_limit_paise,
+        "session_spent_paise": spent,
+        "cart_total_paise": cart_total,
+        "used_paise": used,
+        "remaining_paise": max(0, policy.spending_limit_paise - used)
+    }
+
+
 @router.post("", response_model=PolicyOut, status_code=status.HTTP_201_CREATED)
 def create_policy(
     policy_data: PolicyCreate,

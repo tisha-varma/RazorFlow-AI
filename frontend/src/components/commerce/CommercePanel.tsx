@@ -49,15 +49,15 @@ export function CommercePanel({
   const itemCount = cart?.items?.length || 0;
 
   return (
-    <div className="flex flex-col h-full bg-slate-950/60">
+    <div className="flex flex-col h-full bg-stone-100">
       {/* Header */}
-      <div className="border-b border-slate-800 px-4 py-3 flex items-center gap-2 shrink-0">
-        <ShoppingBag className="h-4 w-4 text-violet-400" />
-        <h2 className="text-sm font-semibold text-white">Commerce</h2>
+      <div className="bg-white border-b border-slate-200 px-4 py-3 flex items-center gap-2 shrink-0 shadow-sm">
+        <ShoppingBag className="h-4 w-4 text-indigo-600" aria-hidden="true" />
+        <h2 className="text-[15px] font-semibold text-slate-900">Commerce</h2>
         {itemCount > 0 && (
           <Badge
             variant="outline"
-            className="text-xs border-violet-500/30 text-violet-400 bg-violet-950/30 ml-auto"
+            className="text-xs border-indigo-200 text-indigo-700 bg-indigo-50 ml-auto"
           >
             {itemCount} {itemCount === 1 ? "item" : "items"}
           </Badge>
@@ -68,7 +68,7 @@ export function CommercePanel({
       <div className="flex-1 overflow-y-auto">
         {/* Approval Section - Shows when approval is pending */}
         {approvalId && sessionId && (
-          <div className="p-4 border-b border-slate-800/50">
+          <div className="p-4">
             <ApprovalScreen
               approvalId={approvalId}
               sessionId={sessionId}
@@ -80,7 +80,7 @@ export function CommercePanel({
 
         {/* Payment Section - Shows after the customer approves */}
         {approvedId && sessionId && (
-          <div className="p-4 border-b border-slate-800/50">
+          <div className="p-4">
             <PaymentBox
               approvalId={approvedId}
               sessionId={sessionId}
@@ -90,7 +90,7 @@ export function CommercePanel({
         )}
 
         {/* Cart Section - Always visible at top */}
-        <div className="p-4 border-b border-slate-800/50">
+        <div className="p-4">
           <CartSummary
             cart={cart || { id: 0, session_id: "", customer_id: "", merchant_id: 1, status: "active", created_at: "", updated_at: "", items: [] }}
             onUpdateQuantity={onUpdateQuantity}
@@ -104,15 +104,15 @@ export function CommercePanel({
           {products.length > 0 && (
             <div>
               <div className="flex items-center gap-2 mb-3">
-                <Sparkles className="h-3.5 w-3.5 text-blue-400" />
-                <h3 className="text-xs font-medium text-slate-400 uppercase tracking-wider">
+                <Sparkles className="h-3.5 w-3.5 text-indigo-600" aria-hidden="true" />
+                <h3 className="text-[13px] font-semibold text-slate-700 uppercase tracking-wider">
                   Products Found
                 </h3>
-                <Badge variant="outline" className="text-[10px] border-slate-600 text-slate-400 ml-auto">
+                <Badge variant="outline" className="text-[11px] border-slate-300 text-slate-600 bg-white ml-auto">
                   {products.length}
                 </Badge>
               </div>
-              <div className="space-y-3">
+              <div className="grid grid-cols-2 xl:grid-cols-3 gap-3">
                 {products.map((product) => (
                   <ProductCard key={product.id} product={product} onAddToCart={onAddToCart} />
                 ))}
@@ -121,9 +121,9 @@ export function CommercePanel({
           )}
 
           {products.length === 0 && itemCount === 0 && (
-            <div className="flex flex-col items-center justify-center py-12 text-center text-slate-500">
-              <Package className="h-8 w-8 mb-3 text-slate-600" />
-              <p className="text-sm">Products will appear here as you chat.</p>
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <Package className="h-8 w-8 mb-3 text-slate-300" aria-hidden="true" />
+              <p className="text-sm text-slate-500">Products will appear here as you chat.</p>
             </div>
           )}
 

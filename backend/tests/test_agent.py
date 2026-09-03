@@ -323,6 +323,179 @@ class TestProductReasons:
         assert result["upsell_products"][0]["reason"] == "Stops blisters on long runs"
 
 
+class TestAgentAuditTrail:
+    @pytest.mark.asyncio
+    async def test_search_and_recommendation_logged(self, db_session, seed_data):
+        from backend.services.ai.agent import Agent
+        from backend.services.ai.llm_client import TextResponse, ToolCallResponse
+        from backend.models.audit import AuditEvent
+
+        p1 = seed_data["p1"]
+        session_id = "audit-agent-1"
+        agent = Agent(_FakeLLMClient([
+            [ToolCallResponse("search_products", {"query": "running"}, "call_1")],
+            [ToolCallResponse("get_related_products", {"product_id": p1.id}, "call_2")],
+            TextResponse(text="Done."),
+        ]))
+        await agent.handle_message(db_session, session_id, "running shoes")
+
+        events = {
+            e.event_type: e
+            for e in db_session.query(AuditEvent).filter(
+                AuditEvent.session_id == session_id
+            ).all()
+        }
+        assert "USER_INTENT_RECEIVED" in events
+        assert "SEARCH_PERFORMED" in events
+        assert events["SEARCH_PERFORMED"].event_data["query"] == "running"
+        assert events["SEARCH_PERFORMED"].event_data["result_count"] >= 1
+        assert "RECOMMENDATION_MADE" in events
+        assert events["RECOMMENDATION_MADE"].event_data["product_id"] == p1.id
+
+    @pytest.mark.asyncio
+    async def test_cart_add_audit_carries_product_name(self, db_session, seed_data):
+        from backend.services.ai.tool_registry import create_tool_registry
+        from backend.models.audit import AuditEvent
+
+        registry = create_tool_registry()
+        p1 = seed_data["p1"]
+        result = await registry.execute("add_to_cart", {
+            "product_id": p1.id,
+            "quantity": 1
+        }, db=db_session, session_id="audit-agent-2")
+        assert result["item_count"] == 1
+
+        event = db_session.query(AuditEvent).filter(
+            AuditEvent.session_id == "audit-agent-2",
+            AuditEvent.event_type == "CART_ITEM_ADDED"
+        ).first()
+        assert event is not None
+        assert event.event_data["product_name"] == "RunPro Sprint"
+
+
+class TestMoreOptions:
+    @pytest.mark.asyncio
+    async def test_more_options_needs_zero_llm_calls(self, db_session, seed_data):
+        from backend.services.ai.agent import Agent
+        from backend.services.ai.llm_client import TextResponse
+
+        p1 = seed_data["p1"]
+        p2 = seed_data["p2"]
+
+        class ExplodingLLM:
+            async def generate(self, *a, **k):
+                raise AssertionError("LLM must not be called for 'more options'")
+
+        agent = Agent(ExplodingLLM())
+        agent._last_search["more-sess-1"] = {"query": "running", "filters": {}}
+        agent._seen_product_ids["more-sess-1"] = {p1.id}
+
+        result = await agent.handle_message(db_session, "more-sess-1", "more options")
+        assert result["state"] == "RECOMMENDING"
+        assert len(result["products"]) >= 1
+        assert all(p["id"] != p1.id for p in result["products"])
+        assert p2.id in [p["id"] for p in result["products"]]
+        assert "More options" in result["response"] or "more options" in result["response"]
+
+    @pytest.mark.asyncio
+    async def test_more_options_exhausted_says_so(self, db_session, seed_data):
+        from backend.services.ai.agent import Agent
+
+        p1 = seed_data["p1"]
+        p2 = seed_data["p2"]
+        p3 = seed_data["p3"]
+
+        class ExplodingLLM:
+            async def generate(self, *a, **k):
+                raise AssertionError("LLM must not be called")
+
+        agent = Agent(ExplodingLLM())
+        agent._last_search["more-sess-2"] = {"query": "running", "filters": {}}
+        agent._seen_product_ids["more-sess-2"] = {p1.id, p2.id, p3.id}
+
+        result = await agent.handle_message(db_session, "more-sess-2", "show me more options")
+        assert result["products"] == []
+        assert "everything" in result["response"]
+
+    @pytest.mark.asyncio
+    async def test_more_without_history_falls_through_to_llm(self, db_session, seed_data):
+        from backend.services.ai.agent import Agent
+        from backend.services.ai.llm_client import TextResponse
+
+        agent = Agent(_FakeLLMClient([TextResponse(text="Sure, what kind?")]))
+        result = await agent.handle_message(db_session, "more-sess-3", "more options")
+        assert agent.llm_client.calls == 1
+        assert result["response"] == "Sure, what kind?"
+
+    @pytest.mark.asyncio
+    async def test_empty_text_does_not_end_turn_blank(self, db_session, seed_data):
+        from backend.services.ai.agent import Agent
+        from backend.services.ai.llm_client import TextResponse
+
+        agent = Agent(_FakeLLMClient([
+            TextResponse(text="   "),
+            TextResponse(text="Hello, how can I help?"),
+        ]))
+        result = await agent.handle_message(db_session, "empty-sess-1", "hi")
+        assert agent.llm_client.calls == 2
+        assert result["response"] == "Hello, how can I help?"
+
+
+class TestAutomaticUpsell:
+    @pytest.mark.asyncio
+    async def test_add_to_cart_carries_related(self, db_session, seed_data):
+        from backend.services.ai.tool_registry import create_tool_registry
+        registry = create_tool_registry()
+        p1 = seed_data["p1"]
+        p3 = seed_data["p3"]
+        result = await registry.execute("add_to_cart", {
+            "product_id": p1.id,
+            "quantity": 1
+        }, db=db_session, session_id="auto-upsell-1")
+        assert result["item_count"] == 1
+        related = result["related_products"]
+        assert len(related) >= 1
+        assert p3.id in [p["id"] for p in related]
+        # The added product itself is never suggested back.
+        assert all(p["id"] != p1.id for p in related)
+        assert all(p["reason"] for p in related)
+        assert all("image_url" in p for p in related)
+
+    @pytest.mark.asyncio
+    async def test_agent_upsell_without_explicit_call(self, db_session, seed_data):
+        from backend.services.ai.agent import Agent
+        from backend.services.ai.llm_client import TextResponse, ToolCallResponse
+
+        p1 = seed_data["p1"]
+        p3 = seed_data["p3"]
+        agent = Agent(_FakeLLMClient([
+            [ToolCallResponse("add_to_cart", {"cart_id": 0, "product_id": p1.id}, "call_1")],
+            TextResponse(text="Added!"),
+        ]))
+        result = await agent.handle_message(db_session, "auto-upsell-2", "add RunPro Sprint")
+        assert result["cart"]["item_count"] == 1
+        assert p3.id in [p["id"] for p in result["upsell_products"]]
+
+    @pytest.mark.asyncio
+    async def test_explicit_upsell_reason_wins(self, db_session, seed_data):
+        from backend.services.ai.agent import Agent
+        from backend.services.ai.llm_client import TextResponse, ToolCallResponse
+
+        p1 = seed_data["p1"]
+        agent = Agent(_FakeLLMClient([
+            [ToolCallResponse("add_to_cart", {"cart_id": 0, "product_id": p1.id}, "call_1")],
+            [ToolCallResponse(
+                "get_related_products",
+                {"product_id": p1.id, "reason": "LLM says so"},
+                "call_2"
+            )],
+            TextResponse(text="Done."),
+        ]))
+        result = await agent.handle_message(db_session, "auto-upsell-3", "add it with extras")
+        reasons = {p["id"]: p.get("reason") for p in result["upsell_products"]}
+        assert all(r == "LLM says so" for r in reasons.values())
+
+
 class TestAgentPrompts:
     def test_system_prompt_exists(self):
         from backend.services.ai.prompts import SYSTEM_PROMPT

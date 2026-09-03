@@ -112,6 +112,26 @@ class TestPolicyEngine:
         assert result.allowed is False
         assert "quantity" in result.reason.lower()
 
+    def test_session_usage_reports_limit_and_remaining(self, client, seed_data):
+        p1 = seed_data["p1"]
+        cart = client.post("/api/cart", json={"session_id": "usage-sess", "merchant_id": 1}).json()
+        client.post(f"/api/cart/{cart['id']}/items", json={"product_id": p1.id, "quantity": 1})
+        resp = client.get("/api/policy/session-usage", params={"session_id": "usage-sess"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["spending_limit_paise"] == 1000000
+        assert data["cart_total_paise"] == 449900
+        assert data["session_spent_paise"] == 0
+        assert data["used_paise"] == 449900
+        assert data["remaining_paise"] == 550100
+
+    def test_session_usage_empty_cart(self, client, seed_data):
+        resp = client.get("/api/policy/session-usage", params={"session_id": "usage-empty"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["used_paise"] == 0
+        assert data["remaining_paise"] == data["spending_limit_paise"]
+
     def test_upsell_limit_blocks(self, db_session, seed_data):
         from backend.models.policy import CommercePolicy
         policy = seed_data["policy"]

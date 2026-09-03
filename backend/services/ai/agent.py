@@ -21,12 +21,22 @@ CHECKOUT_INTENT_RE = re.compile(
     re.IGNORECASE
 )
 
+# Follow-up asking for alternatives to the last search. Handled without any
+# LLM call by re-querying with already-shown items excluded.
+MORE_OPTIONS_RE = re.compile(
+    r"\b(more options|more choices|show more|see more|other options|"
+    r"any others?|alternatives|more like this|what else|other models)\b",
+    re.IGNORECASE
+)
+
 
 class Agent:
     def __init__(self, llm_client: LLMClient):
         self.llm_client = llm_client
         self.tool_registry = create_tool_registry()
         self._history: Dict[str, List[Dict[str, Any]]] = {}
+        self._last_search: Dict[str, Dict[str, Any]] = {}
+        self._seen_product_ids: Dict[str, set] = {}
 
     def _get_history(self, session_id: str) -> List[Dict[str, Any]]:
         if session_id not in self._history:
@@ -70,6 +80,147 @@ class Agent:
             "cart_id": cart.id,
             "approval": result["approval"],
             "totals": result["totals"]
+        }
+
+    def _remember_search(self, session_id: str, query: str, filters: dict | None) -> None:
+        self._last_search[session_id] = {"query": query or "", "filters": filters or {}}
+
+    def _remember_products(self, session_id: str, products: list) -> None:
+        seen = self._seen_product_ids.setdefault(session_id, set())
+        for p in products or []:
+            if isinstance(p, dict) and p.get("id") is not None:
+                seen.add(p["id"])
+        # Bound memory growth per session.
+        if len(seen) > 200:
+            self._seen_product_ids[session_id] = set(list(seen)[-200:])
+
+    def _handle_more_options(
+        self, db: Session, session_id: str, message: str, merchant_id: int = 1
+    ) -> Dict[str, Any] | None:
+        """Deterministic 'more options' follow-up: zero LLM calls.
+
+        Re-runs the session's last search excluding already-shown items.
+        Returns None when the message isn't a more-options ask or when no
+        prior search exists (caller falls through to the LLM loop).
+        """
+        if not MORE_OPTIONS_RE.search(message or ""):
+            return None
+        last = self._last_search.get(session_id)
+        if not last:
+            return None
+
+        from backend.services.catalog_service import CatalogService
+
+        seen = self._seen_product_ids.get(session_id, set())
+        filters = last.get("filters") or {}
+        products, _ = CatalogService.get_products(
+            db,
+            query=last.get("query") or None,
+            category=filters.get("category"),
+            min_price=filters.get("min_price"),
+            max_price=filters.get("max_price"),
+            in_stock=filters.get("in_stock"),
+            limit=20
+        )
+        fresh = [p for p in products if p.id not in seen][:5]
+        query_label = last.get("query") or "your search"
+
+        if not fresh:
+            return {
+                "response": (
+                    "I've shown you everything matching that search. "
+                    "Want to adjust the budget or try a different category?"
+                ),
+                "tool_calls": [],
+                "products": [],
+                "empty": True
+            }
+
+        items = []
+        for p in fresh:
+            items.append({
+                "id": p.id,
+                "name": p.name,
+                "category": p.category,
+                "base_price_paise": p.base_price_paise,
+                "description": p.description,
+                "image_url": p.image_url,
+                "tags": p.tags or [],
+                "in_stock": any(v.stock_quantity > 0 for v in p.variants) if p.variants else False,
+                "reason": f"Another match for '{query_label}'"
+            })
+        self._remember_products(session_id, items)
+        state_machine.set_state(session_id, SessionState.RECOMMENDING)
+        AuditService.log_event(
+            db=db,
+            event_type="SEARCH_PERFORMED",
+            actor="ai",
+            merchant_id=merchant_id,
+            session_id=session_id,
+            event_data={
+                "query": f"{query_label} (more options)",
+                "result_count": len(items),
+                "product_names": [p["name"] for p in items]
+            },
+            related_entity_type="search",
+            related_entity_id=None
+        )
+
+        lines = [f"Here are more options matching '{query_label}':", ""]
+        for i, p in enumerate(items, 1):
+            lines.append(
+                f"{i}. **{p['name']}** — ₹{p['base_price_paise'] / 100:,.0f}\n"
+                f"   {p['description'] or ''}".rstrip()
+            )
+        lines += ["", "Want details on any of these, or should I add one to your cart?"]
+        return {
+            "response": "\n".join(lines),
+            "tool_calls": [{"tool_name": "search_products", "arguments": {"more_options": True}}],
+            "products": items,
+            "empty": False
+        }
+
+    def _finalize(
+        self,
+        db: Session,
+        session_id: str,
+        message: str,
+        merchant_id: int,
+        start_time: float,
+        tool_calls_log: list,
+        final_text: str,
+        products_found: list,
+        upsell_products: list,
+        cart_data: dict | None
+    ) -> Dict[str, Any]:
+        history = self._get_history(session_id)
+        if final_text:
+            history.append({"role": "assistant", "content": final_text})
+            self._trim_history(session_id)
+
+        duration_ms = int((time.time() - start_time) * 1000)
+        interaction = AIInteraction(
+            session_id=session_id,
+            merchant_id=merchant_id,
+            interaction_type="search" if any(tc.get("tool_name") == "search_products" for tc in tool_calls_log) else "recommend",
+            user_message=message,
+            ai_response=final_text,
+            tool_calls=tool_calls_log,
+            tokens_used=0,
+            duration_ms=duration_ms
+        )
+        db.add(interaction)
+        db.commit()
+
+        current_state = state_machine.get_state(session_id)
+
+        return {
+            "response": final_text,
+            "tool_calls": tool_calls_log,
+            "state": current_state.value,
+            "products": products_found[:10],
+            "upsell_products": upsell_products[:5],
+            "cart": cart_data
         }
 
     async def handle_message(
@@ -145,6 +296,15 @@ class Agent:
                 )
             })
 
+        # Deterministic follow-up: answered with zero LLM calls.
+        more = self._handle_more_options(db, session_id, message, merchant_id)
+        if more is not None:
+            return self._finalize(
+                db, session_id, message, merchant_id, start_time,
+                more["tool_calls"], more["response"],
+                more["products"], [], None
+            )
+
         max_iterations = 4
         final_text = ""
         products_found = []
@@ -158,6 +318,10 @@ class Agent:
             )
 
             if isinstance(response, TextResponse):
+                # Empty text carries no content and no tool call: ask the
+                # model again instead of ending on a blank reply.
+                if not response.text or not response.text.strip():
+                    continue
                 # Try to parse text that looks like a tool call (some models emit JSON)
                 parsed = None
                 try:
@@ -207,15 +371,56 @@ class Agent:
                                     if call_reason:
                                         p["reason"] = call_reason
                                     products_found.append(p)
+                            self._remember_search(session_id, args.get("query", ""), args.get("filters"))
+                            self._remember_products(session_id, result)
+                            AuditService.log_event(
+                                db=db,
+                                event_type="SEARCH_PERFORMED",
+                                actor="ai",
+                                merchant_id=merchant_id,
+                                session_id=session_id,
+                                event_data={
+                                    "query": args.get("query", ""),
+                                    "result_count": len(result),
+                                    "product_names": [p.get("name") for p in result[:5]]
+                                },
+                                related_entity_type="search",
+                                related_entity_id=None
+                            )
                         if parsed["name"] == "get_related_products" and isinstance(result, list):
+                            by_id = {x["id"]: x for x in upsell_products}
                             for p in result:
-                                if p["id"] not in {x["id"] for x in upsell_products}:
+                                if p["id"] not in by_id:
                                     if call_reason:
                                         p["reason"] = call_reason
                                     upsell_products.append(p)
+                                    by_id[p["id"]] = p
+                                elif call_reason:
+                                    # An explicit LLM reason beats the automatic one.
+                                    by_id[p["id"]]["reason"] = call_reason
+                            AuditService.log_event(
+                                db=db,
+                                event_type="RECOMMENDATION_MADE",
+                                actor="ai",
+                                merchant_id=merchant_id,
+                                session_id=session_id,
+                                event_data={
+                                    "product_id": args.get("product_id"),
+                                    "product_names": [p.get("name") for p in result[:5]],
+                                    "reason": call_reason
+                                },
+                                related_entity_type="recommendation",
+                                related_entity_id=None
+                            )
                         if parsed["name"] in ("create_cart", "add_to_cart", "remove_from_cart", "update_quantity"):
                             if isinstance(result, dict) and "cart_id" in result:
                                 cart_data = result
+                        if parsed["name"] == "add_to_cart" and isinstance(result, dict):
+                            existing_ids = {p["id"] for p in upsell_products}
+                            for p in result.get("related_products") or []:
+                                if isinstance(p, dict) and p.get("id") not in existing_ids:
+                                    upsell_products.append(p)
+                                    existing_ids.add(p["id"])
                         if parsed["name"] == "search_products":
                             state_machine.set_state(session_id, SessionState.RECOMMENDING)
                         elif parsed["name"] in ("add_to_cart", "create_cart"):
@@ -259,21 +464,68 @@ class Agent:
                                         p["reason"] = call_reason
                                     products_found.append(p)
                                     existing_ids.add(p["id"])
+                            self._remember_search(
+                                session_id,
+                                (resp.arguments or {}).get("query", ""),
+                                (resp.arguments or {}).get("filters")
+                            )
+                            self._remember_products(session_id, result)
+                            AuditService.log_event(
+                                db=db,
+                                event_type="SEARCH_PERFORMED",
+                                actor="ai",
+                                merchant_id=merchant_id,
+                                session_id=session_id,
+                                event_data={
+                                    "query": (resp.arguments or {}).get("query", ""),
+                                    "result_count": len(result),
+                                    "product_names": [p.get("name") for p in result[:5]]
+                                },
+                                related_entity_type="search",
+                                related_entity_id=None
+                            )
 
                         # Collect upsell products from get_related_products
                         if resp.tool_name == "get_related_products" and isinstance(result, list):
-                            existing_ids = {p["id"] for p in upsell_products}
+                            by_id = {p["id"]: p for p in upsell_products}
                             for p in result:
-                                if p["id"] not in existing_ids:
+                                if p["id"] not in by_id:
                                     if call_reason:
                                         p["reason"] = call_reason
                                     upsell_products.append(p)
-                                    existing_ids.add(p["id"])
+                                    by_id[p["id"]] = p
+                                elif call_reason:
+                                    # An explicit LLM reason beats the automatic one.
+                                    by_id[p["id"]]["reason"] = call_reason
+                            AuditService.log_event(
+                                db=db,
+                                event_type="RECOMMENDATION_MADE",
+                                actor="ai",
+                                merchant_id=merchant_id,
+                                session_id=session_id,
+                                event_data={
+                                    "product_id": (resp.arguments or {}).get("product_id"),
+                                    "product_names": [p.get("name") for p in result[:5]],
+                                    "reason": call_reason
+                                },
+                                related_entity_type="recommendation",
+                                related_entity_id=None
+                            )
 
                         # Track cart state (totals + policy result arrive with the payload)
                         if resp.tool_name in ("create_cart", "add_to_cart", "remove_from_cart", "update_quantity"):
                             if isinstance(result, dict) and "cart_id" in result:
                                 cart_data = result
+
+                        # Automatic upsell: add_to_cart carries related items so
+                        # the panel fills even without a get_related_products call.
+                        # Never overwrite a reason set by an explicit upsell call.
+                        if resp.tool_name == "add_to_cart" and isinstance(result, dict):
+                            existing_ids = {p["id"] for p in upsell_products}
+                            for p in result.get("related_products") or []:
+                                if isinstance(p, dict) and p.get("id") not in existing_ids:
+                                    upsell_products.append(p)
+                                    existing_ids.add(p["id"])
 
                         # Update state based on tool calls
                         if resp.tool_name == "search_products":
@@ -309,33 +561,8 @@ class Agent:
             else:
                 final_text = "I'm here to help! Let me know what you're looking for."
 
-        # Save assistant response to history
-        if final_text:
-            history.append({"role": "assistant", "content": final_text})
-            self._trim_history(session_id)
-
-        # Log the AI interaction
-        duration_ms = int((time.time() - start_time) * 1000)
-        interaction = AIInteraction(
-            session_id=session_id,
-            merchant_id=merchant_id,
-            interaction_type="search" if any(tc.get("tool_name") == "search_products" for tc in tool_calls_log) else "recommend",
-            user_message=message,
-            ai_response=final_text,
-            tool_calls=tool_calls_log,
-            tokens_used=0,
-            duration_ms=duration_ms
+        return self._finalize(
+            db, session_id, message, merchant_id, start_time,
+            tool_calls_log, final_text,
+            products_found, upsell_products, cart_data
         )
-        db.add(interaction)
-        db.commit()
-
-        current_state = state_machine.get_state(session_id)
-
-        return {
-            "response": final_text,
-            "tool_calls": tool_calls_log,
-            "state": current_state.value,
-            "products": products_found[:10],
-            "upsell_products": upsell_products[:5],
-            "cart": cart_data
-        }

@@ -79,6 +79,7 @@ def create_tool_registry() -> ToolRegistry:
                 "category": p.category,
                 "base_price_paise": p.base_price_paise,
                 "description": p.description,
+                "image_url": p.image_url,
                 "tags": p.tags or [],
                 "in_stock": any(v.stock_quantity > 0 for v in p.variants) if p.variants else False,
                 "reason": (reason or "").strip() or fallback
@@ -147,6 +148,7 @@ def create_tool_registry() -> ToolRegistry:
             "category": product.category,
             "base_price_paise": product.base_price_paise,
             "description": product.description,
+            "image_url": product.image_url,
             "tags": product.tags or [],
             "variants": variants,
             "related_products": related
@@ -198,8 +200,9 @@ def create_tool_registry() -> ToolRegistry:
         handler=check_stock
     )
 
-    # Tool 4: get_related_products
-    async def get_related_products(db=None, session_id="", product_id=0, reason=None):
+    def _shaped_related(db, product_id, reason=None):
+        """Related products in card-ready shape, shared by the upsell tool
+        and the automatic attachment in add_to_cart."""
         from backend.services.catalog_service import CatalogService
         products, source = CatalogService.get_related_products_with_source(db, product_id)
         # Truthful fallback naming the rule that produced the match, so the
@@ -222,6 +225,7 @@ def create_tool_registry() -> ToolRegistry:
                 "category": p.category,
                 "base_price_paise": p.base_price_paise,
                 "description": p.description,
+                "image_url": p.image_url,
                 "merchant_id": p.merchant_id,
                 "tags": p.tags or [],
                 "is_active": p.is_active,
@@ -231,6 +235,10 @@ def create_tool_registry() -> ToolRegistry:
             }
             for p in products
         ]
+
+    # Tool 4: get_related_products
+    async def get_related_products(db=None, session_id="", product_id=0, reason=None):
+        return _shaped_related(db, product_id, reason)
 
     registry.register(
         name="get_related_products",
@@ -307,6 +315,12 @@ def create_tool_registry() -> ToolRegistry:
         if not payload:
             return {"error": "Failed to add item to cart (product or variant not found)", "cart_id": cart_obj.id}
         cart = payload["cart"]
+        # Product name for a readable trail (additive context only).
+        product_name = None
+        for entry in payload.get("items", []):
+            if entry.get("product_id") == product_id:
+                product_name = entry.get("product_name")
+                break
         # Log audit
         AuditService.log_event(
             db=db,
@@ -317,6 +331,7 @@ def create_tool_registry() -> ToolRegistry:
             event_data={
                 "cart_id": cart.id,
                 "product_id": product_id,
+                "product_name": product_name,
                 "variant_id": variant_id,
                 "quantity": quantity,
                 "is_upsell": is_upsell
@@ -324,15 +339,25 @@ def create_tool_registry() -> ToolRegistry:
             related_entity_type="cart",
             related_entity_id=cart.id
         )
-        return _public_payload(payload)
+        # Automatic upsell: related items ride along with every add so the
+        # panel shows them even if the LLM skips get_related_products.
+        # (The added product itself is excluded - it's already in the cart.)
+        related = [
+            r for r in _shaped_related(db, product_id)
+            if r["id"] != product_id
+        ][:3]
+        public = _public_payload(payload)
+        public["related_products"] = related
+        return public
 
     registry.register(
         name="add_to_cart",
         description=(
             "Add a product to the shopping cart. Set is_upsell=true for upsell items. "
             "If cart_id is omitted or 0, the session's active cart is reused or created automatically. "
-            "The response always includes the cart totals and the policy check result "
-            "(policy_allowed, policy_reason) - never call a separate policy tool."
+            "The response always includes the cart totals, the policy check result "
+            "(policy_allowed, policy_reason), and related upsell candidates "
+            "(related_products) - never call separate policy or upsell tools after adding."
         ),
         parameters={
             "type": "object",
@@ -367,6 +392,13 @@ def create_tool_registry() -> ToolRegistry:
     async def remove_from_cart(db=None, session_id="", cart_id=0, item_id=0):
         from backend.services.cart_service import CartService
         from backend.services.audit_service import AuditService
+        from backend.models.cart import CartItem
+        # Capture item context before deletion for a readable trail.
+        doomed = db.query(CartItem).filter(
+            CartItem.id == item_id, CartItem.cart_id == cart_id
+        ).first() if db is not None else None
+        doomed_name = doomed.product.name if doomed and doomed.product else None
+        doomed_qty = doomed.quantity if doomed else None
         payload = CartService.remove_item(db, cart_id, item_id)
         if not payload:
             return {"error": "Failed to remove item from cart"}
@@ -377,7 +409,12 @@ def create_tool_registry() -> ToolRegistry:
             actor="ai",
             merchant_id=cart.merchant_id,
             session_id=session_id,
-            event_data={"cart_id": cart.id, "item_id": item_id},
+            event_data={
+                "cart_id": cart.id,
+                "item_id": item_id,
+                "product_name": doomed_name,
+                "quantity": doomed_qty
+            },
             related_entity_type="cart",
             related_entity_id=cart.id
         )

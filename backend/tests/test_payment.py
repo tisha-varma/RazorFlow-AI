@@ -174,6 +174,75 @@ class TestVerify:
         assert r1.json()["order_id"] == r2.json()["order_id"]
 
 
+class TestRetryRecovery:
+    def test_failed_payment_recovers_to_paid_on_retry(self, client, db_session, seed_data, monkeypatch):
+        from backend.models.order import Order
+        from backend.models.approval import Approval
+        from backend.services import payment_service as ps
+
+        session_id = "pay-retry-1"
+        appr, cart = TestVerify()._order_for(
+            client, seed_data, monkeypatch, session_id, "order_retry1"
+        )
+
+        # 1. First attempt fails signature check.
+        monkeypatch.setattr(ps, "verify_payment_signature", lambda *a: False)
+        fail = client.post("/api/payment/verify", json={
+            "razorpay_order_id": "order_retry1",
+            "razorpay_payment_id": "pay_fail1",
+            "razorpay_signature": "bad",
+            "session_id": session_id,
+        })
+        assert fail.status_code == 400
+        assert state_machine.get_state(session_id) == SessionState.PAYMENT_FAILED
+
+        # 2. Retry re-triggers create-order on the SAME approval (new gateway
+        #    order per Razorpay's one-order-per-attempt rule, no new approval).
+        monkeypatch.setattr(
+            ps, "create_razorpay_order",
+            lambda amount, receipt, notes=None: {
+                "razorpay_order_id": "order_retry2",
+                "amount_paise": amount, "currency": "INR", "status": "created",
+            },
+        )
+        monkeypatch.setattr(ps, "verify_payment_signature", lambda *a: True)
+        retry = client.post(
+            f"/api/payment/create-order/{appr['id']}", json={"session_id": session_id}
+        )
+        assert retry.status_code == 200
+        assert retry.json()["razorpay_order_id"] == "order_retry2"
+        assert state_machine.get_state(session_id) == SessionState.PAYMENT_PENDING
+
+        # 3. Second attempt verifies cleanly to a paid order.
+        ok = client.post("/api/payment/verify", json={
+            "razorpay_order_id": "order_retry2",
+            "razorpay_payment_id": "pay_ok1",
+            "razorpay_signature": "sig",
+            "session_id": session_id,
+        })
+        assert ok.status_code == 200
+        assert ok.json()["status"] == "paid"
+        assert state_machine.get_state(session_id) == SessionState.ORDER_CONFIRMED
+
+        # 4. Exactly one approval, one paid order, no double charge.
+        # (db_session shares the test engine with the API override.)
+        db_session.expire_all()
+        assert db_session.query(Approval).filter(
+            Approval.session_id == session_id
+        ).count() == 1
+        orders = db_session.query(Order).filter(Order.session_id == session_id).all()
+        paid = [o for o in orders if o.status == "paid"]
+        failed = [o for o in orders if o.status == "failed"]
+        assert len(paid) == 1
+        assert paid[0].razorpay_order_id == "order_retry2"
+        assert len(failed) == 1
+        assert failed[0].razorpay_order_id == "order_retry1"
+
+    def test_failed_to_pending_transition_valid(self):
+        from backend.services.state_machine import VALID_TRANSITIONS
+        assert SessionState.PAYMENT_PENDING in VALID_TRANSITIONS[SessionState.PAYMENT_FAILED]
+
+
 def _signed_webhook(secret, payload_dict):
     body = json.dumps(payload_dict, separators=(",", ":")).encode()
     sig = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()

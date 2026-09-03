@@ -4,11 +4,13 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { ChatPanel } from "@/components/chat/ChatPanel";
 import { CommercePanel } from "@/components/commerce/CommercePanel";
+import { AuditTrail } from "@/components/audit/AuditTrail";
+import { SessionLimitBar } from "@/components/commerce/SessionLimitBar";
 import { Product, Cart } from "@/lib/types";
 import { fetchJson } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, ShieldCheck } from "lucide-react";
+import { ArrowLeft, ShieldCheck, Activity } from "lucide-react";
 
 export default function BuyerPage() {
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -18,6 +20,7 @@ export default function BuyerPage() {
   const [policyActive, setPolicyActive] = useState(false);
   const [approvalId, setApprovalId] = useState<number | null>(null);
   const [approvedId, setApprovedId] = useState<number | null>(null);
+  const [showAudit, setShowAudit] = useState(false);
   const chatRef = useRef<{ sendMessage: (msg: string) => void } | null>(null);
   const cartRef = useRef<Cart | null>(null);
 
@@ -65,30 +68,19 @@ export default function BuyerPage() {
       .catch(() => setPolicyActive(false));
   }, [fetchCart]);
 
+  // UI cart actions hit the API directly and NEVER go through the agent:
+  // no LLM calls, no conversational waiting. The panel updates from the
+  // API response alone.
   const handleUpdateQuantity = useCallback(async (itemId: number, quantity: number) => {
     const currentCart = cartRef.current;
     if (!currentCart) return;
 
-    const item = currentCart.items?.find((i) => i.id === itemId);
-    if (!item) return;
-
-    const oldQty = item.quantity;
-    const action = quantity > oldQty ? "increased" : "decreased";
-
     try {
-      // Update quantity
       await fetchJson(`/cart/${currentCart.id}/items/${itemId}`, {
         method: "PUT",
         body: JSON.stringify({ quantity }),
       });
-
-      // Fetch updated cart
-      const updatedCart = await fetchCart(currentCart.id);
-
-      // Send chat confirmation AFTER cart is updated
-      if (chatRef.current && updatedCart) {
-        chatRef.current.sendMessage(`I ${action} the quantity of ${item.product_name} to ${quantity}. What's the new total?`);
-      }
+      await fetchCart(currentCart.id);
     } catch (e) {
       console.error("Failed to update quantity:", e);
     }
@@ -98,58 +90,44 @@ export default function BuyerPage() {
     const currentCart = cartRef.current;
     if (!currentCart) return;
 
-    const item = currentCart.items?.find((i) => i.id === itemId);
-    if (!item) return;
-
     try {
       await fetchJson(`/cart/${currentCart.id}/items/${itemId}`, {
         method: "DELETE",
       });
-
-      const updatedCart = await fetchCart(currentCart.id);
-
-      if (chatRef.current) {
-        chatRef.current.sendMessage(`I removed ${item.product_name} from my cart`);
-      }
+      await fetchCart(currentCart.id);
     } catch (e) {
       console.error("Failed to remove item:", e);
     }
   }, [fetchCart]);
 
   const handleAddToCart = useCallback(async (product: Product) => {
-    const currentCart = cartRef.current;
+    let cartId: number | undefined = cartRef.current?.id;
 
     try {
-      if (!currentCart) {
+      if (!cartId) {
         // Create cart first
         const newCart = await fetchJson("/cart", {
           method: "POST",
           body: JSON.stringify({ session_id: sessionId, merchant_id: 1 }),
         });
-        setCart(newCart);
-        cartRef.current = newCart;
+        cartId = newCart.id;
+      }
+      if (!cartId) return;
 
-        await fetchJson(`/cart/${newCart.id}/items`, {
-          method: "POST",
-          body: JSON.stringify({ product_id: product.id, quantity: 1 }),
-        });
+      await fetchJson(`/cart/${cartId}/items`, {
+        method: "POST",
+        body: JSON.stringify({ product_id: product.id, quantity: 1 }),
+      });
+      await fetchCart(cartId);
 
-        const updatedCart = await fetchCart(newCart.id);
-
-        if (chatRef.current) {
-          chatRef.current.sendMessage(`I added ${product.name} to my cart`);
+      // Upsell via direct catalog call — no agent round trip.
+      try {
+        const related = await fetchJson(`/catalog/products/${product.id}/related`);
+        if (Array.isArray(related) && related.length > 0) {
+          setUpsellProducts(related);
         }
-      } else {
-        await fetchJson(`/cart/${currentCart.id}/items`, {
-          method: "POST",
-          body: JSON.stringify({ product_id: product.id, quantity: 1 }),
-        });
-
-        const updatedCart = await fetchCart(currentCart.id);
-
-        if (chatRef.current) {
-          chatRef.current.sendMessage(`I added ${product.name} to my cart`);
-        }
+      } catch {
+        /* upsell is a bonus — cart already updated */
       }
     } catch (e) {
       console.error("Failed to add to cart:", e);
@@ -191,46 +169,78 @@ export default function BuyerPage() {
     }
   }, []);
 
+  // Products already in the cart are hidden from discovery lists —
+  // the panel shows what you can still add, latest recommendations first.
+  const cartProductIds = new Set((cart?.items ?? []).map((i) => i.product_id));
+  const visibleProducts = products.filter((p) => !cartProductIds.has(p.id));
+  const visibleUpsell = upsellProducts.filter((p) => !cartProductIds.has(p.id));
+
   if (!sessionId) {
     return (
-      <div className="h-screen bg-slate-950 text-white flex items-center justify-center">
-        <div className="text-slate-400">Initializing session...</div>
+      <div className="h-screen bg-stone-100 text-slate-900 flex items-center justify-center">
+        <div className="text-slate-500">Initializing session…</div>
       </div>
     );
   }
 
   return (
-    <div className="h-screen bg-slate-950 text-white flex flex-col">
-      <header className="border-b border-slate-900 bg-slate-950/80 backdrop-blur-md px-4 py-3 flex items-center gap-4 z-50">
+    <div className="h-screen bg-stone-100 text-slate-900 flex flex-col">
+      <header className="border-b border-slate-200 bg-white px-4 py-3 flex items-center gap-3 z-50 shadow-sm">
         <Link href="/">
-          <Button variant="ghost" size="sm" className="text-slate-400 hover:text-white">
-            <ArrowLeft className="h-4 w-4 mr-1" />
+          <Button variant="ghost" size="sm" className="text-slate-500 hover:text-slate-900">
+            <ArrowLeft className="h-4 w-4 mr-1" aria-hidden="true" />
             Back
           </Button>
         </Link>
 
         <div className="flex items-center gap-2">
-          <div className="h-6 w-6 rounded bg-blue-600 flex items-center justify-center text-xs font-bold text-white">
+          <div className="h-7 w-7 rounded-lg bg-indigo-600 flex items-center justify-center text-xs font-bold text-white">
             R
           </div>
-          <span className="font-semibold text-sm">RazorFlow AI</span>
+          <span className="font-semibold text-[15px] text-slate-900">RazorFlow AI</span>
         </div>
 
-        <Badge variant="outline" className="border-blue-500/30 text-blue-400 bg-blue-950/20 text-xs">
+        <Badge variant="outline" className="border-slate-300 text-slate-600 bg-slate-50 text-xs">
           Test Mode
         </Badge>
 
         {policyActive && (
-          <Badge variant="outline" className="border-emerald-500/30 text-emerald-400 bg-emerald-950/20 text-xs gap-1">
-            <ShieldCheck className="h-3 w-3" />
+          <Badge variant="outline" className="border-emerald-300 text-emerald-700 bg-emerald-50 text-xs gap-1">
+            <ShieldCheck className="h-3 w-3" aria-hidden="true" />
             Policy Active
           </Badge>
         )}
 
-        <span className="ml-auto text-xs text-slate-500 font-mono">
-          Session: {sessionId.slice(0, 8)}...
-        </span>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setShowAudit((v) => !v)}
+          aria-expanded={showAudit}
+          className={showAudit ? "text-indigo-700 bg-indigo-50" : "text-slate-500 hover:text-slate-900"}
+        >
+          <Activity className="h-4 w-4 mr-1" aria-hidden="true" />
+          Audit trail
+        </Button>
+
+        <div className="ml-auto flex items-center gap-3">
+          <SessionLimitBar
+            sessionId={sessionId}
+            refreshKey={`${cart?.id ?? 0}-${approvalId ?? 0}-${approvedId ?? 0}`}
+          />
+          <span className="text-xs text-slate-400 font-mono tabular-nums">
+            {sessionId.slice(0, 8)}…
+          </span>
+        </div>
       </header>
+
+      {showAudit && (
+        <div className="h-72 shrink-0 overflow-hidden border-b border-slate-200 bg-white px-4 py-3 shadow-sm">
+          <AuditTrail
+            sessionId={sessionId}
+            refreshKey={`${cart?.id ?? 0}-${approvalId ?? 0}-${approvedId ?? 0}`}
+          />
+        </div>
+      )}
 
       <div className="flex-1 flex overflow-hidden">
         <div className="w-1/2 min-w-0">
@@ -245,9 +255,9 @@ export default function BuyerPage() {
         </div>
         <div className="w-1/2 min-w-0">
           <CommercePanel
-            products={products}
+            products={visibleProducts}
             cart={cart}
-            upsellProducts={upsellProducts}
+            upsellProducts={visibleUpsell}
             approvalId={approvalId}
             approvedId={approvedId}
             sessionId={sessionId || ""}

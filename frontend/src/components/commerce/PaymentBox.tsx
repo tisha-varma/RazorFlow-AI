@@ -122,48 +122,53 @@ export function PaymentBox({ approvalId, sessionId, onPaid }: PaymentBoxProps) {
   };
 
   return (
-    <div className="rounded-xl border border-violet-500/30 bg-violet-950/40 p-4">
+    <div className="rounded-xl border border-slate-200 bg-white shadow-md p-5">
       <div className="mb-2 flex items-center gap-2">
-        <CreditCard className="h-4 w-4 text-violet-300" />
-        <h3 className="text-sm font-semibold text-white">Payment</h3>
+        <div className="w-7 h-7 rounded-lg bg-emerald-100 flex items-center justify-center">
+          <CreditCard className="h-3.5 w-3.5 text-emerald-700" aria-hidden="true" />
+        </div>
+        <h3 className="text-[15px] font-semibold text-slate-900">Payment</h3>
       </div>
 
       {phase === "success" && paidOrder ? (
-        <div className="flex items-start gap-2 rounded-lg border border-emerald-500/30 bg-emerald-950/40 p-3">
-          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
+        <div className="flex items-start gap-2 rounded-lg border border-emerald-300 bg-emerald-50 p-3" aria-live="polite">
+          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" aria-hidden="true" />
           <div className="text-sm">
-            <p className="font-medium text-emerald-300">Payment successful</p>
-            <p className="mt-0.5 font-mono text-xs text-emerald-400/80">
+            <p className="font-semibold text-emerald-800">Payment successful</p>
+            <p className="mt-0.5 font-mono text-xs tabular-nums text-emerald-700">
               {paidOrder.order_number} · {formatPaise(paidOrder.total_paise)}
             </p>
           </div>
         </div>
       ) : (
         <>
-          <p className="mb-1 text-xs text-slate-400">
+          <p className="mb-2 text-[13px] text-slate-500">
             Test mode — pay with a Razorpay test card or UPI to complete the order.
           </p>
           {(phase === "creating" || phase === "verifying") && (
-            <div className="mb-2 flex items-center gap-2 rounded-lg border border-violet-500/20 bg-violet-950/60 p-2.5 text-xs text-violet-200">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <div className="mb-2 flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 p-2.5 text-[13px] text-indigo-800" aria-live="polite">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
               {phase === "creating"
                 ? "Creating secure order on the server…"
                 : "Verifying payment signature on the server…"}
             </div>
           )}
-          {phase === "failed" && error && (
-            <div className="mb-2 flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-950/40 p-2.5 text-xs text-red-300">
-              <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              <span>{error}</span>
+          {phase === "failed" && (
+            <div className="mb-2 flex items-start gap-2 rounded-lg border border-red-300 bg-red-50 p-2.5 text-[13px] text-red-700" aria-live="polite">
+              <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span>
+                Payment didn&apos;t go through — no charge was made.
+                {error ? ` ${error}` : " You can safely try again."}
+              </span>
             </div>
           )}
           <Button
             onClick={startPayment}
             disabled={phase === "creating" || phase === "verifying" || phase === "checkout"}
-            className="w-full bg-violet-600 hover:bg-violet-500 text-white"
+            className="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-[15px] font-semibold h-11 shadow-sm touch-manipulation"
           >
             {(phase === "creating" || phase === "verifying") && (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
             )}
             {phase === "failed"
               ? "Retry payment"

@@ -27,7 +27,7 @@ VALID_TRANSITIONS = {
     SessionState.AWAITING_APPROVAL: [SessionState.PAYMENT_PENDING, SessionState.CART_BUILDING, SessionState.CANCELLED],
     SessionState.PAYMENT_PENDING: [SessionState.PAYMENT_SUCCESS, SessionState.PAYMENT_FAILED],
     SessionState.PAYMENT_SUCCESS: [SessionState.ORDER_CONFIRMED],
-    SessionState.PAYMENT_FAILED: [SessionState.CART_BUILDING, SessionState.CANCELLED],
+    SessionState.PAYMENT_FAILED: [SessionState.CART_BUILDING, SessionState.CANCELLED, SessionState.PAYMENT_PENDING],
     SessionState.ORDER_CONFIRMED: [SessionState.IDLE],
     SessionState.CANCELLED: [SessionState.IDLE],
 }

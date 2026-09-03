@@ -1,9 +1,10 @@
 "use client";
 
 import { Cart } from "@/lib/types";
-import { ShoppingBag, Trash2, Plus, Minus, Package } from "lucide-react";
+import { ShoppingBag, Trash2, Plus, Minus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ProductImage } from "@/components/commerce/ProductImage";
 
 interface CartSummaryProps {
   cart: Cart;
@@ -25,63 +26,64 @@ export function CartSummary({ cart, onUpdateQuantity, onRemoveItem, onCheckout }
 
   if (items.length === 0) {
     return (
-      <div className="bg-slate-800/30 rounded-xl border border-slate-700/40 p-6">
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
         <div className="flex flex-col items-center text-center">
-          <div className="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center mb-3">
-            <ShoppingBag className="h-5 w-5 text-slate-500" />
+          <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center mb-3">
+            <ShoppingBag className="h-5 w-5 text-slate-400" aria-hidden="true" />
           </div>
-          <p className="text-sm text-slate-400 font-medium">Your cart is empty</p>
-          <p className="text-xs text-slate-500 mt-1">Add items to get started</p>
+          <p className="text-[15px] text-slate-700 font-semibold">Your cart is empty</p>
+          <p className="text-[13px] text-slate-500 mt-1">Add items to get started</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="bg-gradient-to-b from-slate-800/60 to-slate-800/30 rounded-xl border border-slate-700/40 overflow-hidden">
+    <div className="bg-white rounded-xl border border-slate-200 shadow-md overflow-hidden">
       {/* Header */}
-      <div className="px-4 py-3 border-b border-slate-700/40 flex items-center justify-between">
+      <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-lg bg-violet-500/20 flex items-center justify-center">
-            <ShoppingBag className="h-3.5 w-3.5 text-violet-400" />
+          <div className="w-7 h-7 rounded-lg bg-indigo-100 flex items-center justify-center">
+            <ShoppingBag className="h-3.5 w-3.5 text-indigo-600" aria-hidden="true" />
           </div>
-          <span className="text-sm font-semibold text-white">Cart</span>
+          <span className="text-[15px] font-semibold text-slate-900">Cart</span>
         </div>
         <Badge
           variant="outline"
-          className="text-[10px] border-violet-500/30 text-violet-400 bg-violet-950/30 px-2 py-0.5"
+          className="text-[11px] border-indigo-200 text-indigo-700 bg-indigo-50 px-2 py-0.5"
         >
           {itemCount} {itemCount === 1 ? "item" : "items"}
         </Badge>
       </div>
 
       {/* Items */}
-      <div className="divide-y divide-slate-700/30">
+      <div className="divide-y divide-slate-100">
         {items.map((item) => (
-          <div key={item.id} className="px-4 py-3 hover:bg-slate-700/20 transition-colors">
+          <div key={item.id} className="px-4 py-3">
             <div className="flex items-start gap-3">
-              {/* Product icon */}
-              <div className="w-10 h-10 rounded-lg bg-slate-700/50 flex items-center justify-center shrink-0">
-                <Package className="h-5 w-5 text-slate-400" />
-              </div>
+              <ProductImage
+                src={item.image_url}
+                alt={item.product_name}
+                className="aspect-square w-14 shrink-0 rounded-lg"
+              />
 
               {/* Details */}
               <div className="flex-1 min-w-0">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <p className="text-sm font-medium text-white truncate">
+                    <p className="text-[14px] font-semibold text-slate-900 leading-snug">
                       {item.product_name}
                     </p>
                     {item.is_upsell && (
                       <Badge
                         variant="outline"
-                        className="text-[9px] border-amber-500/30 text-amber-400 bg-amber-950/20 mt-1"
+                        className="text-[10px] border-amber-300 text-amber-800 bg-amber-50 mt-1"
                       >
                         Upsell
                       </Badge>
                     )}
                   </div>
-                  <span className="text-sm font-semibold text-white shrink-0">
+                  <span className="text-[14px] font-bold tabular-nums text-slate-900 shrink-0">
                     ₹{((item.unit_price_paise * item.quantity) / 100).toLocaleString("en-IN")}
                   </span>
                 </div>
@@ -94,7 +96,8 @@ export function CartSummary({ cart, onUpdateQuantity, onRemoveItem, onCheckout }
                         <Button
                           variant="outline"
                           size="icon"
-                          className="h-7 w-7 border-slate-600 bg-slate-800 hover:bg-slate-700"
+                          aria-label={`Decrease quantity of ${item.product_name}`}
+                          className="h-7 w-7 border-slate-300 bg-white hover:bg-slate-100"
                           onClick={() => {
                             if (item.quantity <= 1) {
                               onRemoveItem?.(item.id);
@@ -103,23 +106,24 @@ export function CartSummary({ cart, onUpdateQuantity, onRemoveItem, onCheckout }
                             }
                           }}
                         >
-                          <Minus className="h-3 w-3" />
+                          <Minus className="h-3 w-3" aria-hidden="true" />
                         </Button>
-                        <span className="w-8 text-center text-sm font-medium text-white">
+                        <span className="w-8 text-center text-sm font-semibold tabular-nums text-slate-900">
                           {item.quantity}
                         </span>
                         <Button
                           variant="outline"
                           size="icon"
-                          className="h-7 w-7 border-slate-600 bg-slate-800 hover:bg-slate-700"
+                          aria-label={`Increase quantity of ${item.product_name}`}
+                          className="h-7 w-7 border-slate-300 bg-white hover:bg-slate-100"
                           onClick={() => onUpdateQuantity(item.id, item.quantity + 1)}
                         >
-                          <Plus className="h-3 w-3" />
+                          <Plus className="h-3 w-3" aria-hidden="true" />
                         </Button>
                       </>
                     )}
                     {!onUpdateQuantity && (
-                      <span className="text-xs text-slate-400">Qty: {item.quantity}</span>
+                      <span className="text-[13px] text-slate-500">Qty: {item.quantity}</span>
                     )}
                   </div>
 
@@ -127,10 +131,11 @@ export function CartSummary({ cart, onUpdateQuantity, onRemoveItem, onCheckout }
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-7 w-7 text-slate-500 hover:text-red-400 hover:bg-red-500/10"
+                      aria-label={`Remove ${item.product_name} from cart`}
+                      className="h-7 w-7 text-slate-400 hover:text-red-600 hover:bg-red-50"
                       onClick={() => onRemoveItem(item.id)}
                     >
-                      <Trash2 className="h-3.5 w-3.5" />
+                      <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
                     </Button>
                   )}
                 </div>
@@ -140,24 +145,24 @@ export function CartSummary({ cart, onUpdateQuantity, onRemoveItem, onCheckout }
         ))}
       </div>
 
-      {/* Summary */}
-      <div className="px-4 py-3 border-t border-slate-700/40 bg-slate-800/20">
+      {/* Summary — the money moment */}
+      <div className="px-4 py-4 border-t-2 border-emerald-100 bg-emerald-50/50">
         {upsellPaise > 0 && (
-          <div className="flex justify-between text-xs text-slate-400 mb-1">
+          <div className="flex justify-between text-[13px] text-slate-600 mb-1">
             <span>Upsell items</span>
-            <span className="font-mono">+₹{(upsellPaise / 100).toLocaleString("en-IN")}</span>
+            <span className="tabular-nums">+₹{(upsellPaise / 100).toLocaleString("en-IN")}</span>
           </div>
         )}
         <div className="flex justify-between items-baseline">
-          <span className="text-sm text-slate-300">Total</span>
-          <span className="text-lg font-bold text-white">
+          <span className="text-[15px] font-semibold text-slate-700">Total</span>
+          <span className="text-2xl font-bold tabular-nums text-emerald-700">
             ₹{(subtotalPaise / 100).toLocaleString("en-IN")}
           </span>
         </div>
         {onCheckout && (
           <Button
             onClick={onCheckout}
-            className="w-full bg-violet-600 hover:bg-violet-500 text-white text-sm mt-3 h-10"
+            className="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-[15px] font-semibold mt-3 h-11 shadow-sm"
           >
             Proceed to Checkout
           </Button>

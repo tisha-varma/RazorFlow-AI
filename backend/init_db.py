@@ -5,6 +5,29 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from backend.database import SessionLocal, engine, Base
 from backend.models import Merchant, Product, ProductVariant, CommercePolicy
 
+_PRODUCT_IMAGES = {
+    "RunPro Sprint": "runpro-sprint.jpg",
+    "UltraGlide Marathon": "ultraglide-marathon.jpg",
+    "TrailBlazer X": "trailblazer-x.jpg",
+    "TrailGrip Pro": "trailgrip-pro.jpg",
+    "FeatherStep Lite": "featherstep-lite.jpg",
+    "SpeedElite Racer": "speedelite-racer.jpg",
+    "CushionMax Daily": "cushionmax-daily.jpg",
+    "ProStride Carbon": "prostride-carbon.jpg",
+    "MudRunner Grip": "mudrunner-grip.jpg",
+    "Performance Running Socks (3-Pack)": "running-socks.jpg",
+    "Hydration Running Belt": "hydration-belt.jpg",
+    "Reflective Running Vest": "reflective-vest.jpg",
+    "Compression Calf Sleeves": "calf-sleeves.jpg",
+    "Anti-Blister Insoles": "anti-blister-insoles.jpg",
+    "Running Cap UV Protection": "running-cap.jpg",
+}
+
+
+def _product_slug(name: str) -> str:
+    return _PRODUCT_IMAGES.get(name, "placeholder.jpg").replace(".jpg", "")
+
+
 def seed_db():
     print("Recreating database tables...")
     Base.metadata.drop_all(bind=engine)
@@ -66,7 +89,7 @@ def seed_db():
                 ai_description=f"Product name: {p_data['name']}. Category: {p_data['category']}. Price: Rs. {p_data['price']/100:.2f}. Description: {p_data['desc']} Tags: {', '.join(p_data['tags'])}",
                 category=p_data["category"],
                 base_price_paise=p_data["price"],
-                image_url=f"/placeholder-{p_data['id']}.jpg",
+                image_url=f"/products/{_product_slug(p_data['name'])}.jpg",
                 tags=p_data["tags"],
                 is_active=True
             )
