@@ -37,6 +37,7 @@ class CartService:
         policy = CartService.check_cart_policy(db, cart)
 
         details = policy["details"] or {}
+        policy_snapshot_id = details.get("policy_snapshot_id")
         AuditService.log_event(
             db=db,
             event_type="POLICY_CHECK_PASSED" if policy["allowed"] else "POLICY_CHECK_FAILED",
@@ -48,10 +49,13 @@ class CartService:
                 "allowed": policy["allowed"],
                 "reason": policy["reason"],
                 "cart_total_paise": totals["total_paise"] if totals else 0,
-                "max_transaction_paise": details.get("max_transaction"),
+                "max_transaction_paise": details.get("max_transaction_paise") or details.get("max_transaction"),
                 "spending_limit_paise": details.get("spending_limit_paise"),
-                "remaining_paise": details.get("remaining_budget")
+                "remaining_paise": details.get("remaining_budget"),
+                "policy_snapshot_id": policy_snapshot_id,
+                "policy_snapshot": details
             },
+            policy_snapshot_id=policy_snapshot_id,
             related_entity_type="cart",
             related_entity_id=cart.id
         )

@@ -24,6 +24,11 @@ class TestAuditEndpoint:
         for key in ("id", "event_type", "event_data", "actor", "timestamp"):
             assert key in first
 
+        policy_event = next(e for e in events if e["event_type"] == "POLICY_CHECK_PASSED")
+        assert policy_event["policy_snapshot_id"]
+        assert policy_event["event_data"]["policy_snapshot_id"] == policy_event["policy_snapshot_id"]
+        assert policy_event["event_data"]["policy_snapshot"]["max_transaction_paise"] == 500000
+
     def test_session_isolation(self, client, seed_data):
         self._seed_trail(client, seed_data, session_id="audit-a")
         self._seed_trail(client, seed_data, session_id="audit-b")

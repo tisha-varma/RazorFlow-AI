@@ -43,7 +43,9 @@ def _wire_state_recorder():
     # tests already wired their isolated engine.
     from backend.services import session_state_log
     from backend.services.state_machine import state_machine
-    from backend.database import SessionLocal
+    from backend.database import SessionLocal, engine
+    from backend.services.schema_compat import ensure_sqlite_schema
+    ensure_sqlite_schema(engine)
     session_state_log.configure(SessionLocal)
     state_machine.on_transition(session_state_log.record_transition)
 

@@ -302,8 +302,10 @@ class TestProductReasons:
     async def test_agent_attaches_call_reason_to_cards(self, db_session, seed_data):
         from backend.services.ai.agent import Agent
         from backend.services.ai.llm_client import TextResponse, ToolCallResponse
+        from backend.models.audit import AuditEvent
 
         p1 = seed_data["p1"]
+        session_id = "reason-flow-1"
         agent = Agent(_FakeLLMClient([
             [ToolCallResponse(
                 "search_products",
@@ -317,10 +319,16 @@ class TestProductReasons:
             )],
             TextResponse(text="Done."),
         ]))
-        result = await agent.handle_message(db_session, "reason-flow-1", "running shoes")
+        result = await agent.handle_message(db_session, session_id, "running shoes")
 
         assert result["products"][0]["reason"] == "Under your budget, built for distance"
         assert result["upsell_products"][0]["reason"] == "Stops blisters on long runs"
+        event = db_session.query(AuditEvent).filter(
+            AuditEvent.session_id == session_id,
+            AuditEvent.event_type == "RECOMMENDATION_MADE"
+        ).first()
+        assert event.llm_reason_text == "Stops blisters on long runs"
+        assert event.event_data["llm_reason_text"] == "Stops blisters on long runs"
 
 
 class TestAgentAuditTrail:
@@ -329,6 +337,7 @@ class TestAgentAuditTrail:
         from backend.services.ai.agent import Agent
         from backend.services.ai.llm_client import TextResponse, ToolCallResponse
         from backend.models.audit import AuditEvent
+        from backend.models.ai_interaction import AIInteraction
 
         p1 = seed_data["p1"]
         session_id = "audit-agent-1"
@@ -351,6 +360,10 @@ class TestAgentAuditTrail:
         assert events["SEARCH_PERFORMED"].event_data["result_count"] >= 1
         assert "RECOMMENDATION_MADE" in events
         assert events["RECOMMENDATION_MADE"].event_data["product_id"] == p1.id
+        interaction = db_session.query(AIInteraction).filter(
+            AIInteraction.session_id == session_id
+        ).one()
+        assert interaction.tokens_used > 0
 
     @pytest.mark.asyncio
     async def test_cart_add_audit_carries_product_name(self, db_session, seed_data):

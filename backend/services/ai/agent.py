@@ -228,6 +228,23 @@ class Agent:
         )
         return "\n".join(lines)
 
+    def _tokens_from_response(self, response: Any) -> int:
+        if isinstance(response, list):
+            return max((int(getattr(r, "tokens_used", 0) or 0) for r in response), default=0)
+        return int(getattr(response, "tokens_used", 0) or 0)
+
+    def _estimate_tokens_used(
+        self,
+        messages: List[Dict[str, Any]],
+        final_text: str,
+        tool_calls_log: list
+    ) -> int:
+        text = " ".join(str(m.get("content", "")) for m in messages)
+        text += " " + (final_text or "")
+        text += " " + json.dumps(tool_calls_log, default=str)
+        # Conservative fallback for providers/fakes that omit usage metadata.
+        return max(1, len(text) // 4)
+
     def _finalize(
         self,
         db: Session,
@@ -239,7 +256,9 @@ class Agent:
         final_text: str,
         products_found: list,
         upsell_products: list,
-        cart_data: dict | None
+        cart_data: dict | None,
+        tokens_used: int = 0,
+        llm_calls: int = 0
     ) -> Dict[str, Any]:
         history = self._get_history(session_id)
         if final_text:
@@ -247,6 +266,8 @@ class Agent:
             self._trim_history(session_id)
 
         duration_ms = int((time.time() - start_time) * 1000)
+        if llm_calls > 0 and tokens_used <= 0:
+            tokens_used = self._estimate_tokens_used(history, final_text, tool_calls_log)
         interaction = AIInteraction(
             session_id=session_id,
             merchant_id=merchant_id,
@@ -254,7 +275,7 @@ class Agent:
             user_message=message,
             ai_response=final_text,
             tool_calls=tool_calls_log,
-            tokens_used=0,
+            tokens_used=tokens_used,
             duration_ms=duration_ms
         )
         db.add(interaction)
@@ -280,6 +301,8 @@ class Agent:
     ) -> Dict[str, Any]:
         start_time = time.time()
         tool_calls_log = []
+        tokens_used = 0
+        llm_calls = 0
 
         # Log user intent
         AuditService.log_event(
@@ -359,7 +382,9 @@ class Agent:
             return self._finalize(
                 db, session_id, message, merchant_id, start_time,
                 more["tool_calls"], more["response"],
-                more["products"], [], None
+                more["products"], [], None,
+                tokens_used=tokens_used,
+                llm_calls=llm_calls
             )
 
         max_iterations = 4
@@ -373,6 +398,8 @@ class Agent:
                 tools=self.tool_registry.get_definitions(),
                 system_prompt=SYSTEM_PROMPT
             )
+            llm_calls += 1
+            tokens_used += self._tokens_from_response(response)
 
             if isinstance(response, TextResponse):
                 # Empty text carries no content and no tool call: ask the
@@ -464,8 +491,10 @@ class Agent:
                                 event_data={
                                     "product_id": args.get("product_id"),
                                     "product_names": [p.get("name") for p in result[:5]],
-                                    "reason": call_reason
+                                    "reason": call_reason,
+                                    "llm_reason_text": call_reason
                                 },
+                                llm_reason_text=call_reason,
                                 related_entity_type="recommendation",
                                 related_entity_id=None
                             )
@@ -563,8 +592,10 @@ class Agent:
                                 event_data={
                                     "product_id": (resp.arguments or {}).get("product_id"),
                                     "product_names": [p.get("name") for p in result[:5]],
-                                    "reason": call_reason
+                                    "reason": call_reason,
+                                    "llm_reason_text": call_reason
                                 },
+                                llm_reason_text=call_reason,
                                 related_entity_type="recommendation",
                                 related_entity_id=None
                             )
@@ -621,5 +652,7 @@ class Agent:
         return self._finalize(
             db, session_id, message, merchant_id, start_time,
             tool_calls_log, final_text,
-            products_found, upsell_products, cart_data
+            products_found, upsell_products, cart_data,
+            tokens_used=tokens_used,
+            llm_calls=llm_calls
         )

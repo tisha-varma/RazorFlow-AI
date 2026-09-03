@@ -13,19 +13,38 @@ class ToolDefinition:
 
 
 class LLMResponse:
-    pass
+    def __init__(self, tokens_used: int = 0):
+        self.tokens_used = tokens_used
 
 
 class TextResponse(LLMResponse):
-    def __init__(self, text: str):
+    def __init__(self, text: str, tokens_used: int = 0):
+        super().__init__(tokens_used=tokens_used)
         self.text = text
 
 
 class ToolCallResponse(LLMResponse):
-    def __init__(self, tool_name: str, arguments: dict, tool_call_id: str = ""):
+    def __init__(self, tool_name: str, arguments: dict, tool_call_id: str = "", tokens_used: int = 0):
+        super().__init__(tokens_used=tokens_used)
         self.tool_name = tool_name
         self.arguments = arguments
         self.tool_call_id = tool_call_id
+
+
+def _openai_style_usage_tokens(response: Any) -> int:
+    usage = getattr(response, "usage", None)
+    if not usage:
+        return 0
+    total = getattr(usage, "total_tokens", None)
+    return int(total or 0)
+
+
+def _gemini_usage_tokens(response: Any) -> int:
+    usage = getattr(response, "usage_metadata", None)
+    if not usage:
+        return 0
+    total = getattr(usage, "total_token_count", None)
+    return int(total or 0)
 
 
 class LLMClient(ABC):
@@ -95,11 +114,14 @@ class OllamaLLMClient(LLMClient):
                 data = resp.json()
 
             choice = data["choices"][0]["message"]
+            tokens_used = int(data.get("usage", {}).get("total_tokens") or 0)
+            if not tokens_used:
+                tokens_used = int(data.get("prompt_eval_count") or 0) + int(data.get("eval_count") or 0)
 
             if choice.get("tool_calls"):
                 results = []
                 if choice.get("content"):
-                    results.append(TextResponse(text=choice["content"]))
+                    results.append(TextResponse(text=choice["content"], tokens_used=tokens_used))
                 for tc in choice["tool_calls"]:
                     args = {}
                     func = tc.get("function", {})
@@ -108,12 +130,13 @@ class OllamaLLMClient(LLMClient):
                     results.append(ToolCallResponse(
                         tool_name=func["name"],
                         arguments=args,
-                        tool_call_id=tc.get("id", f"call_{uuid.uuid4().hex[:12]}")
+                        tool_call_id=tc.get("id", f"call_{uuid.uuid4().hex[:12]}"),
+                        tokens_used=tokens_used
                     ))
                 return results
 
             if choice.get("content"):
-                return TextResponse(text=choice["content"])
+                return TextResponse(text=choice["content"], tokens_used=tokens_used)
 
             return TextResponse(text="I couldn't generate a response. Please try again.")
 
@@ -179,11 +202,12 @@ class GroqLLMClient(LLMClient):
         try:
             response = self.client.chat.completions.create(**kwargs)
             choice = response.choices[0]
+            tokens_used = _openai_style_usage_tokens(response)
 
             if choice.message.tool_calls:
                 results = []
                 if choice.message.content:
-                    results.append(TextResponse(text=choice.message.content))
+                    results.append(TextResponse(text=choice.message.content, tokens_used=tokens_used))
                 for tc in choice.message.tool_calls:
                     args = {}
                     if tc.function.arguments:
@@ -191,12 +215,13 @@ class GroqLLMClient(LLMClient):
                     results.append(ToolCallResponse(
                         tool_name=tc.function.name,
                         arguments=args,
-                        tool_call_id=tc.id
+                        tool_call_id=tc.id,
+                        tokens_used=tokens_used
                     ))
                 return results
 
             if choice.message.content:
-                return TextResponse(text=choice.message.content)
+                return TextResponse(text=choice.message.content, tokens_used=tokens_used)
 
             return TextResponse(text="I couldn't generate a response. Please try again.")
 
@@ -278,11 +303,12 @@ class RotatingGroqClient(LLMClient):
 
         response = client.chat.completions.create(**kwargs)
         choice = response.choices[0]
+        tokens_used = _openai_style_usage_tokens(response)
 
         if choice.message.tool_calls:
             results = []
             if choice.message.content:
-                results.append(TextResponse(text=choice.message.content))
+                results.append(TextResponse(text=choice.message.content, tokens_used=tokens_used))
             for tc in choice.message.tool_calls:
                 args = {}
                 if tc.function.arguments:
@@ -290,12 +316,13 @@ class RotatingGroqClient(LLMClient):
                 results.append(ToolCallResponse(
                     tool_name=tc.function.name,
                     arguments=args,
-                    tool_call_id=tc.id
+                    tool_call_id=tc.id,
+                    tokens_used=tokens_used
                 ))
             return results
 
         if choice.message.content:
-            return TextResponse(text=choice.message.content)
+            return TextResponse(text=choice.message.content, tokens_used=tokens_used)
 
         return TextResponse(text="I couldn't generate a response. Please try again.")
 
@@ -355,6 +382,7 @@ class GeminiLLMClient(LLMClient):
                 contents=contents,
                 config=config
             )
+            tokens_used = _gemini_usage_tokens(response)
 
             if response.candidates and response.candidates[0].content:
                 parts = response.candidates[0].content.parts
@@ -366,7 +394,8 @@ class GeminiLLMClient(LLMClient):
                         tool_calls.append(ToolCallResponse(
                             tool_name=part.function_call.name,
                             arguments=dict(part.function_call.args) if part.function_call.args else {},
-                            tool_call_id=f"call_{uuid.uuid4().hex[:12]}"
+                            tool_call_id=f"call_{uuid.uuid4().hex[:12]}",
+                            tokens_used=tokens_used
                         ))
                     elif part.text:
                         text_parts.append(part.text)
@@ -374,12 +403,12 @@ class GeminiLLMClient(LLMClient):
                 if tool_calls:
                     results = []
                     if text_parts:
-                        results.append(TextResponse(text="\n".join(text_parts)))
+                        results.append(TextResponse(text="\n".join(text_parts), tokens_used=tokens_used))
                     results.extend(tool_calls)
                     return results
 
                 if text_parts:
-                    return TextResponse(text="\n".join(text_parts))
+                    return TextResponse(text="\n".join(text_parts), tokens_used=tokens_used)
 
             return TextResponse(text="I couldn't generate a response. Please try again.")
 

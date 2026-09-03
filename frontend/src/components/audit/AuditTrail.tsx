@@ -34,6 +34,8 @@ interface AuditEvent {
   merchant_id: number;
   event_type: string;
   event_data: Record<string, unknown>;
+  llm_reason_text?: string | null;
+  policy_snapshot_id?: string | null;
   actor: string;
   timestamp?: string | null;
   related_entity_type?: string | null;
@@ -76,14 +78,6 @@ const FAILED_TYPES = new Set([
   "PAYMENT_ORDER_FAILED",
   "PAYMENT_FAILED",
 ]);
-
-const ACTOR_STYLES: Record<string, string> = {
-  user: "border-sky-300 text-sky-700 bg-sky-50",
-  ai: "border-indigo-300 text-indigo-700 bg-indigo-50",
-  system: "border-slate-300 text-slate-600 bg-slate-100",
-  merchant: "border-emerald-300 text-emerald-700 bg-emerald-50",
-  customer: "border-amber-300 text-amber-700 bg-amber-50",
-};
 
 const EVENT_ICONS: Record<string, typeof Search> = {
   USER_INTENT_RECEIVED: MessageSquare,
@@ -157,7 +151,7 @@ function detailFor(event: AuditEvent): string | null {
     }
     case "RECOMMENDATION_MADE": {
       const list = names(d.product_names);
-      const reason = str(d.reason);
+      const reason = str(event.llm_reason_text) ?? str(d.llm_reason_text) ?? str(d.reason);
       return `${list ?? "items"}${reason ? ` — ${reason}` : ""}`;
     }
     case "UPSELL_OFFERED": {
@@ -188,11 +182,14 @@ function detailFor(event: AuditEvent): string | null {
       const limit = paise(d.max_transaction_paise);
       if (total && limit) {
         const verdict = `₹${(Number(d.cart_total_paise) / 100).toLocaleString("en-IN")} ≤ ₹${(Number(d.max_transaction_paise) / 100).toLocaleString("en-IN")}`;
+        const snapshot = event.policy_snapshot_id ? ` · ${event.policy_snapshot_id}` : "";
         return event.event_type === "POLICY_CHECK_FAILED" && str(d.reason)
-          ? `${verdict} — ${str(d.reason)}`
-          : verdict;
+          ? `${verdict} — ${str(d.reason)}${snapshot}`
+          : `${verdict}${snapshot}`;
       }
-      return str(d.reason) ?? (event.event_type === "POLICY_CHECK_PASSED" ? "within limits" : null);
+      const snapshot = event.policy_snapshot_id ? ` · ${event.policy_snapshot_id}` : "";
+      const fallback = str(d.reason) ?? (event.event_type === "POLICY_CHECK_PASSED" ? "within limits" : null);
+      return fallback ? `${fallback}${snapshot}` : null;
     }
     case "POLICY_CHANGED": {
       const action = str(d.action);
@@ -245,6 +242,7 @@ export function AuditTrail({ sessionId, merchantId, refreshKey }: AuditTrailProp
   const [error, setError] = useState<string | null>(null);
 
   const fetchTrail = useCallback(async () => {
+    void refreshKey;
     const params = new URLSearchParams();
     if (sessionId) params.set("session_id", sessionId);
     if (merchantId !== undefined && merchantId !== null) {
@@ -268,9 +266,12 @@ export function AuditTrail({ sessionId, merchantId, refreshKey }: AuditTrailProp
   }, [sessionId, merchantId, refreshKey]);
 
   useEffect(() => {
-    fetchTrail();
+    const immediate = setTimeout(fetchTrail, 0);
     const timer = setInterval(fetchTrail, 4000);
-    return () => clearInterval(timer);
+    return () => {
+      clearTimeout(immediate);
+      clearInterval(timer);
+    };
   }, [fetchTrail]);
 
   return (

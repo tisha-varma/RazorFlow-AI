@@ -40,6 +40,8 @@ def list_events(
             "merchant_id": e.merchant_id,
             "event_type": e.event_type,
             "event_data": e.event_data or {},
+            "llm_reason_text": e.llm_reason_text,
+            "policy_snapshot_id": e.policy_snapshot_id,
             "actor": e.actor,
             "timestamp": e.timestamp.isoformat() if e.timestamp else None,
             "related_entity_type": e.related_entity_type,

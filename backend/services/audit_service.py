@@ -11,6 +11,8 @@ class AuditService:
         merchant_id: int = 1,
         session_id: Optional[str] = None,
         event_data: Optional[Dict[str, Any]] = None,
+        llm_reason_text: Optional[str] = None,
+        policy_snapshot_id: Optional[str] = None,
         related_entity_type: Optional[str] = None,
         related_entity_id: Optional[int] = None
     ) -> AuditEvent:
@@ -19,6 +21,8 @@ class AuditService:
             merchant_id=merchant_id,
             event_type=event_type,
             event_data=event_data or {},
+            llm_reason_text=llm_reason_text,
+            policy_snapshot_id=policy_snapshot_id,
             actor=actor,
             related_entity_type=related_entity_type,
             related_entity_id=related_entity_id

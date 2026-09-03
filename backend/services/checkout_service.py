@@ -61,6 +61,7 @@ class CheckoutService:
         policy = db.query(CommercePolicy).filter(CommercePolicy.is_active == True).first()
         if policy:
             policy_result = PolicyEngine.check_purchase_policy(db, cart_id, session_id, policy)
+            policy_snapshot_id = policy_result.policy_details.get("policy_snapshot_id")
             if not policy_result.allowed:
                 state_machine.set_state(session_id, SessionState.POLICY_CHECK)
                 AuditService.log_event(
@@ -69,7 +70,18 @@ class CheckoutService:
                     actor="system",
                     merchant_id=policy.merchant_id,
                     session_id=session_id,
-                    event_data={"cart_id": cart_id, "allowed": False, "reason": policy_result.reason},
+                    event_data={
+                        "cart_id": cart_id,
+                        "allowed": False,
+                        "reason": policy_result.reason,
+                        "cart_total_paise": totals["total_paise"],
+                        "max_transaction_paise": policy_result.policy_details.get("max_transaction_paise"),
+                        "spending_limit_paise": policy_result.policy_details.get("spending_limit_paise"),
+                        "remaining_paise": policy_result.policy_details.get("remaining_budget"),
+                        "policy_snapshot_id": policy_snapshot_id,
+                        "policy_snapshot": policy_result.policy_details
+                    },
+                    policy_snapshot_id=policy_snapshot_id,
                     related_entity_type="cart",
                     related_entity_id=cart_id
                 )
@@ -78,6 +90,27 @@ class CheckoutService:
                     "policy_allowed": False,
                     "policy_reason": policy_result.reason
                 }
+            AuditService.log_event(
+                db=db,
+                event_type="POLICY_CHECK_PASSED",
+                actor="system",
+                merchant_id=policy.merchant_id,
+                session_id=session_id,
+                event_data={
+                    "cart_id": cart_id,
+                    "allowed": True,
+                    "reason": None,
+                    "cart_total_paise": totals["total_paise"],
+                    "max_transaction_paise": policy_result.policy_details.get("max_transaction_paise"),
+                    "spending_limit_paise": policy_result.policy_details.get("spending_limit_paise"),
+                    "remaining_paise": policy_result.policy_details.get("remaining_budget"),
+                    "policy_snapshot_id": policy_snapshot_id,
+                    "policy_snapshot": policy_result.policy_details
+                },
+                policy_snapshot_id=policy_snapshot_id,
+                related_entity_type="cart",
+                related_entity_id=cart_id
+            )
 
         # Reuse an existing pending approval instead of duplicating it.
         existing = db.query(Approval).filter(
