@@ -61,6 +61,28 @@ class TestCatalogEndpoints:
         related = resp.json()
         assert len(related) >= 1
 
+    def test_get_related_falls_back_without_explicit_links(self, client, seed_data, db_session):
+        from backend.models import Product
+        merchant_id = seed_data["merchant"].id
+        lone = Product(
+            merchant_id=merchant_id, name="Lone Runner", description="d",
+            category="Running Shoes", base_price_paise=100000,
+            tags=["running"], is_active=True
+        )
+        acc = Product(
+            merchant_id=merchant_id, name="Lone Socks", description="d",
+            category="Accessories", base_price_paise=10000,
+            tags=["running", "accessories"], is_active=True
+        )
+        db_session.add_all([lone, acc])
+        db_session.commit()
+
+        resp = client.get(f"/api/catalog/products/{lone.id}/related")
+        assert resp.status_code == 200
+        related = resp.json()
+        assert len(related) == 1
+        assert related[0]["name"] == "Lone Socks"
+
 
 class TestRelatedFallback:
     def _make_product(self, db_session, merchant_id, name, category, tags):

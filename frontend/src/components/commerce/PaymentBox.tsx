@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { CreditCard, Loader2, CheckCircle2, XCircle } from "lucide-react";
 
@@ -8,6 +9,7 @@ interface PaidOrder {
   order_id: number;
   order_number: string;
   total_paise: number;
+  razorpay_payment_id?: string | null;
 }
 
 interface PaymentBoxProps {
@@ -131,14 +133,32 @@ export function PaymentBox({ approvalId, sessionId, onPaid }: PaymentBoxProps) {
       </div>
 
       {phase === "success" && paidOrder ? (
-        <div className="flex items-start gap-2 rounded-lg border border-emerald-300 bg-emerald-50 p-3" aria-live="polite">
-          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" aria-hidden="true" />
-          <div className="text-sm">
-            <p className="font-semibold text-emerald-800">Payment successful</p>
-            <p className="mt-0.5 font-mono text-xs tabular-nums text-emerald-700">
-              {paidOrder.order_number} · {formatPaise(paidOrder.total_paise)}
+        <div className="rounded-xl border border-emerald-300 bg-emerald-50 px-6 py-8 text-center shadow-sm" aria-live="polite">
+          <CheckCircle2 className="mx-auto h-10 w-10 text-emerald-600" aria-hidden="true" />
+          <h3 className="mt-3 text-lg font-bold tracking-wide text-emerald-800">
+            PAYMENT SUCCESS ✓
+          </h3>
+          <p className="mt-2 text-3xl font-bold tabular-nums text-slate-900">
+            {formatPaise(paidOrder.total_paise)}
+          </p>
+          <div className="mt-3 space-y-1 text-sm text-slate-600">
+            <p>
+              Order: <span className="font-mono font-semibold text-slate-800">{paidOrder.order_number}</span>
             </p>
+            {paidOrder.razorpay_payment_id && (
+              <p>
+                Razorpay Payment:{" "}
+                <span className="font-mono text-slate-800">{paidOrder.razorpay_payment_id}</span>
+              </p>
+            )}
           </div>
+          <p className="mt-3 text-sm text-slate-600">Your order has been confirmed.</p>
+          <Link
+            href="/merchant"
+            className="mt-4 inline-flex h-10 items-center justify-center rounded-lg bg-emerald-600 px-6 text-sm font-semibold text-white shadow-sm hover:bg-emerald-500 touch-manipulation"
+          >
+            View Order
+          </Link>
         </div>
       ) : (
         <>

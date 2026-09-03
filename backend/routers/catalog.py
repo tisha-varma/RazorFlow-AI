@@ -65,10 +65,13 @@ def get_related(id: int, db: Session = Depends(get_db)):
     product = CatalogService.get_product_by_id(db, id)
     if not product:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, 
+            status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Product with id {id} not found"
         )
-    return CatalogService.get_related_products(db, id)
+    # Same rule-based fallback as the agent path (curated relations first,
+    # then tag-matched Accessories) so UI-driven adds always get upsells.
+    products, _ = CatalogService.get_related_products_with_source(db, id)
+    return products
 
 @router.post("/products", response_model=ProductOut, status_code=status.HTTP_201_CREATED)
 def create_product(

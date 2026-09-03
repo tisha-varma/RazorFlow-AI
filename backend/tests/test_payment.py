@@ -243,6 +243,43 @@ class TestRetryRecovery:
         assert SessionState.PAYMENT_PENDING in VALID_TRANSITIONS[SessionState.PAYMENT_FAILED]
 
 
+class TestPaidClearsCart:
+    def test_paid_order_empties_cart(self, client, seed_data, monkeypatch):
+        appr, data = TestVerify()._order_for(client, seed_data, monkeypatch, "pay-clear-1", "order_clr1")
+        cart_id = appr["cart_id"]
+        resp = client.post("/api/payment/verify", json={
+            "razorpay_order_id": "order_clr1",
+            "razorpay_payment_id": "pay_clr1",
+            "razorpay_signature": "sig",
+            "session_id": "pay-clear-1",
+        })
+        assert resp.status_code == 200
+        cart = client.get(f"/api/cart/{cart_id}").json()
+        assert cart["items"] == []
+        assert cart["status"] == "checked_out"
+
+
+class TestFailedSpend:
+    def test_failed_payment_consumes_no_budget(self, client, seed_data, monkeypatch):
+        from backend.services import payment_service as ps
+
+        appr, data = TestVerify()._order_for(client, seed_data, monkeypatch, "pay-failspend-1", "order_fs1")
+        monkeypatch.setattr(ps, "verify_payment_signature", lambda *a: False)
+        fail = client.post("/api/payment/verify", json={
+            "razorpay_order_id": "order_fs1",
+            "razorpay_payment_id": "pay_fs1",
+            "razorpay_signature": "bad",
+            "session_id": "pay-failspend-1",
+        })
+        assert fail.status_code == 400
+
+        usage = client.get("/api/policy/session-usage", params={"session_id": "pay-failspend-1"}).json()
+        assert usage["session_spent_paise"] == 0
+        # Only the still-active cart counts — the failed order adds nothing.
+        assert usage["used_paise"] == usage["cart_total_paise"] == 449900
+        assert usage["remaining_paise"] == 1000000 - 449900
+
+
 def _signed_webhook(secret, payload_dict):
     body = json.dumps(payload_dict, separators=(",", ":")).encode()
     sig = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()

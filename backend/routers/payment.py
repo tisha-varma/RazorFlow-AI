@@ -51,6 +51,10 @@ def _mark_order_paid(
 
     cart = db.query(Cart).filter(Cart.id == order.cart_id).first()
     if cart:
+        # Order is paid: empty the cart entirely so it can't be re-bought
+        # or double-counted. The Order rows preserve what was purchased.
+        from backend.models.cart import CartItem
+        db.query(CartItem).filter(CartItem.cart_id == cart.id).delete()
         cart.status = "checked_out"
 
     approval = (
@@ -309,6 +313,7 @@ def verify_payment(req: VerifyPaymentRequest, db: Session = Depends(get_db)):
             order_id=order.id,
             order_number=order.order_number,
             total_paise=order.total_paise,
+            razorpay_payment_id=payment.razorpay_payment_id,
         )
 
     try:
@@ -335,6 +340,7 @@ def verify_payment(req: VerifyPaymentRequest, db: Session = Depends(get_db)):
         order_id=order.id,
         order_number=order.order_number,
         total_paise=order.total_paise,
+        razorpay_payment_id=req.razorpay_payment_id,
     )
 
 

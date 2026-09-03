@@ -346,6 +346,39 @@ def create_tool_registry() -> ToolRegistry:
             r for r in _shaped_related(db, product_id)
             if r["id"] != product_id
         ][:3]
+        if related:
+            AuditService.log_event(
+                db=db,
+                event_type="UPSELL_OFFERED",
+                actor="ai",
+                merchant_id=cart.merchant_id,
+                session_id=session_id,
+                event_data={
+                    "cart_id": cart.id,
+                    "primary_product_id": product_id,
+                    "primary_product_name": product_name,
+                    "product_names": [r["name"] for r in related],
+                    "amounts_paise": [r["base_price_paise"] for r in related]
+                },
+                related_entity_type="cart",
+                related_entity_id=cart.id
+            )
+        if is_upsell:
+            AuditService.log_event(
+                db=db,
+                event_type="UPSELL_ACCEPTED",
+                actor="customer",
+                merchant_id=cart.merchant_id,
+                session_id=session_id,
+                event_data={
+                    "cart_id": cart.id,
+                    "product_id": product_id,
+                    "product_name": product_name,
+                    "quantity": quantity
+                },
+                related_entity_type="cart",
+                related_entity_id=cart.id
+            )
         public = _public_payload(payload)
         public["related_products"] = related
         return public
@@ -389,17 +422,19 @@ def create_tool_registry() -> ToolRegistry:
     )
 
     # Tool 7: remove_from_cart (totals + policy check included automatically)
-    async def remove_from_cart(db=None, session_id="", cart_id=0, item_id=0):
+    async def remove_from_cart(db=None, session_id="", cart_id=0, item_id=0,
+                               product_id=None, product_name=None):
         from backend.services.cart_service import CartService
         from backend.services.audit_service import AuditService
-        from backend.models.cart import CartItem
-        # Capture item context before deletion for a readable trail.
-        doomed = db.query(CartItem).filter(
-            CartItem.id == item_id, CartItem.cart_id == cart_id
-        ).first() if db is not None else None
-        doomed_name = doomed.product.name if doomed and doomed.product else None
-        doomed_qty = doomed.quantity if doomed else None
-        payload = CartService.remove_item(db, cart_id, item_id)
+        # Resolve by id, product id, or fuzzy product name - never ask the
+        # customer for internal IDs.
+        target = CartService.find_item(db, cart_id, item_id or None,
+                                       product_id, product_name)
+        if not target:
+            return {"error": "No matching item in cart (tried item_id, product_id, product_name)"}
+        doomed_name = target.product.name if target.product else None
+        doomed_qty = target.quantity
+        payload = CartService.remove_item(db, cart_id, target.id)
         if not payload:
             return {"error": "Failed to remove item from cart"}
         cart = payload["cart"]
@@ -411,7 +446,7 @@ def create_tool_registry() -> ToolRegistry:
             session_id=session_id,
             event_data={
                 "cart_id": cart.id,
-                "item_id": item_id,
+                "item_id": target.id,
                 "product_name": doomed_name,
                 "quantity": doomed_qty
             },
@@ -422,7 +457,12 @@ def create_tool_registry() -> ToolRegistry:
 
     registry.register(
         name="remove_from_cart",
-        description="Remove an item from the shopping cart. The response includes updated totals and the policy check result.",
+        description=(
+            "Remove an item from the shopping cart. Identify it by item_id, "
+            "product_id, or product_name (fuzzy matched) - NEVER ask the customer "
+            "for internal IDs, just use the name they said. The response includes "
+            "updated totals and the policy check result."
+        ),
         parameters={
             "type": "object",
             "properties": {
@@ -432,25 +472,43 @@ def create_tool_registry() -> ToolRegistry:
                 },
                 "item_id": {
                     "type": "integer",
-                    "description": "The cart item ID to remove"
+                    "description": "The cart item ID (preferred when known)"
+                },
+                "product_id": {
+                    "type": "integer",
+                    "description": "Alternative: the product ID"
+                },
+                "product_name": {
+                    "type": "string",
+                    "description": "Alternative: product name or fragment, e.g. 'socks'"
                 }
             },
-            "required": ["cart_id", "item_id"]
+            "required": ["cart_id"]
         },
         handler=remove_from_cart
     )
 
     # Tool 8: update_quantity (totals + policy check included automatically)
-    async def update_quantity(db=None, session_id="", cart_id=0, item_id=0, quantity=1):
+    async def update_quantity(db=None, session_id="", cart_id=0, item_id=0,
+                              quantity=1, product_id=None, product_name=None):
         from backend.services.cart_service import CartService
-        payload = CartService.update_quantity(db, cart_id, item_id, quantity)
+        target = CartService.find_item(db, cart_id, item_id or None,
+                                       product_id, product_name)
+        if not target:
+            return {"error": "No matching item in cart (tried item_id, product_id, product_name)"}
+        payload = CartService.update_quantity(db, cart_id, target.id, quantity)
         if not payload:
             return {"error": "Failed to update quantity"}
         return _public_payload(payload)
 
     registry.register(
         name="update_quantity",
-        description="Update the quantity of an item in the cart. The response includes updated totals and the policy check result.",
+        description=(
+            "Update the quantity of an item in the cart. Identify it by item_id, "
+            "product_id, or product_name (fuzzy matched) - NEVER ask the customer "
+            "for internal IDs. The response includes updated totals and the policy "
+            "check result."
+        ),
         parameters={
             "type": "object",
             "properties": {
@@ -460,14 +518,22 @@ def create_tool_registry() -> ToolRegistry:
                 },
                 "item_id": {
                     "type": "integer",
-                    "description": "The cart item ID"
+                    "description": "The cart item ID (preferred when known)"
+                },
+                "product_id": {
+                    "type": "integer",
+                    "description": "Alternative: the product ID"
+                },
+                "product_name": {
+                    "type": "string",
+                    "description": "Alternative: product name or fragment"
                 },
                 "quantity": {
                     "type": "integer",
                     "description": "New quantity"
                 }
             },
-            "required": ["cart_id", "item_id", "quantity"]
+            "required": ["cart_id", "quantity"]
         },
         handler=update_quantity
     )

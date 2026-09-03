@@ -180,6 +180,54 @@ class Agent:
             "empty": False
         }
 
+    def _cart_snapshot(self, db: Session, session_id: str) -> Dict[str, Any] | None:
+        """Live cart truth for the current session, read straight from the DB.
+
+        UI clicks mutate the cart without touching the agent, so the LLM must
+        never answer cart questions from memory. Returns a payload dict (same
+        shape as mutation payloads, minus the audit side effect) or None when
+        the cart is missing/empty.
+        """
+        from backend.services.cart_service import CartService
+
+        cart = CartService.get_active_cart_by_session(db, session_id)
+        if not cart:
+            return None
+        totals = CartService.calculate_totals(db, cart.id)
+        if not totals or totals["item_count"] == 0:
+            return None
+        policy = CartService.check_cart_policy(db, cart)
+        return {
+            "cart": cart,
+            "cart_id": cart.id,
+            "status": cart.status,
+            "item_count": totals["item_count"],
+            "total_paise": totals["total_paise"],
+            "items": totals["items"],
+            "policy_allowed": policy["allowed"],
+            "policy_reason": policy["reason"],
+            "policy_details": policy["details"]
+        }
+
+    def _snapshot_note(self, snapshot: Dict[str, Any]) -> str:
+        lines = [
+            "Live cart (authoritative — never guess contents, never ask the "
+            "customer for item IDs; use the item_id values below or pass "
+            "product_name and the backend resolves it):"
+        ]
+        for item in snapshot["items"]:
+            upsell = " (upsell)" if item.get("is_upsell") else ""
+            lines.append(
+                f"- [item_id {item['item_id']}] {item['product_name']} "
+                f"x{item['quantity']} = ₹{item['total_paise'] / 100:,.0f}{upsell}"
+            )
+        lines.append(
+            f"Total: ₹{snapshot['total_paise'] / 100:,.0f} across "
+            f"{snapshot['item_count']} item(s). "
+            f"Policy: {'allowed' if snapshot['policy_allowed'] else 'BLOCKED — ' + str(snapshot['policy_reason'])}."
+        )
+        return "\n".join(lines)
+
     def _finalize(
         self,
         db: Session,
@@ -295,6 +343,15 @@ class Agent:
                     f"quantity, or removing upsell items)."
                 )
             })
+
+        # Live cart truth on every turn: UI mutations bypass the agent,
+        # so the model answers from the DB snapshot, never from memory.
+        # Also keeps the commerce panel in sync even on text-only turns.
+        snapshot = self._cart_snapshot(db, session_id)
+        if snapshot is not None:
+            messages.append({"role": "system", "content": self._snapshot_note(snapshot)})
+            if cart_data is None:
+                cart_data = {k: v for k, v in snapshot.items() if k != "cart"}
 
         # Deterministic follow-up: answered with zero LLM calls.
         more = self._handle_more_options(db, session_id, message, merchant_id)

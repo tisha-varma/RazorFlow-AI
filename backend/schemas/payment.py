@@ -33,6 +33,7 @@ class VerifyPaymentResponse(BaseModel):
     order_id: int
     order_number: str
     total_paise: int
+    razorpay_payment_id: str | None = None
 
 
 class WebhookResult(BaseModel):

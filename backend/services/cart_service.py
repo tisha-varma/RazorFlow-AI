@@ -36,6 +36,7 @@ class CartService:
         totals = CartService.calculate_totals(db, cart.id)
         policy = CartService.check_cart_policy(db, cart)
 
+        details = policy["details"] or {}
         AuditService.log_event(
             db=db,
             event_type="POLICY_CHECK_PASSED" if policy["allowed"] else "POLICY_CHECK_FAILED",
@@ -45,7 +46,11 @@ class CartService:
             event_data={
                 "cart_id": cart.id,
                 "allowed": policy["allowed"],
-                "reason": policy["reason"]
+                "reason": policy["reason"],
+                "cart_total_paise": totals["total_paise"] if totals else 0,
+                "max_transaction_paise": details.get("max_transaction"),
+                "spending_limit_paise": details.get("spending_limit_paise"),
+                "remaining_paise": details.get("remaining_budget")
             },
             related_entity_type="cart",
             related_entity_id=cart.id
@@ -137,6 +142,45 @@ class CartService:
         db.commit()
         db.refresh(cart)
         return CartService._mutation_payload(db, cart)
+
+    @staticmethod
+    def find_item(
+        db: Session,
+        cart_id: int,
+        item_id: Optional[int] = None,
+        product_id: Optional[int] = None,
+        product_name: Optional[str] = None
+    ) -> Optional[CartItem]:
+        """Resolve a cart item by id, product id, or fuzzy product name.
+
+        The LLM never knows item_ids reliably, so callers may pass what the
+        customer actually said. First match wins.
+        """
+        if item_id:
+            item = db.query(CartItem).filter(
+                CartItem.id == item_id,
+                CartItem.cart_id == cart_id
+            ).first()
+            if item:
+                return item
+        if product_id:
+            item = db.query(CartItem).filter(
+                CartItem.cart_id == cart_id,
+                CartItem.product_id == product_id
+            ).first()
+            if item:
+                return item
+        if product_name and product_name.strip():
+            needle = f"%{product_name.strip()}%"
+            item = db.query(CartItem).join(
+                Product, Product.id == CartItem.product_id
+            ).filter(
+                CartItem.cart_id == cart_id,
+                Product.name.ilike(needle)
+            ).first()
+            if item:
+                return item
+        return None
 
     @staticmethod
     def remove_item(db: Session, cart_id: int, item_id: int) -> Optional[Dict[str, Any]]:

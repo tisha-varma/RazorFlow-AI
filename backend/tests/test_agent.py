@@ -496,6 +496,127 @@ class TestAutomaticUpsell:
         assert all(r == "LLM says so" for r in reasons.values())
 
 
+class TestLiveCartSnapshot:
+    @pytest.mark.asyncio
+    async def test_text_turn_sees_ui_side_cart(self, db_session, seed_data):
+        from backend.services.ai.agent import Agent
+        from backend.services.ai.llm_client import TextResponse
+        from backend.services.cart_service import CartService
+
+        session_id = "snapshot-sess-1"
+        cart = CartService.create_cart(db_session, session_id, 1)
+        CartService.add_item(db_session, cart.id, seed_data["p1"].id, quantity=1)
+        CartService.add_item(db_session, cart.id, seed_data["p3"].id, quantity=1)
+
+        agent = Agent(_FakeLLMClient([TextResponse(text="Your cart total is fine.")]))
+        result = await agent.handle_message(db_session, session_id, "what is my cart value now")
+
+        assert agent.llm_client.calls == 1
+        assert result["cart"]["item_count"] == 2
+        assert result["cart"]["total_paise"] == 449900 + 49900
+        assert result["cart"]["policy_allowed"] is True
+
+    def test_snapshot_note_lists_item_ids(self, db_session, seed_data):
+        from backend.services.ai.agent import Agent
+        from backend.services.cart_service import CartService
+        from backend.services.ai.llm_client import TextResponse
+
+        session_id = "snapshot-sess-2"
+        cart = CartService.create_cart(db_session, session_id, 1)
+        CartService.add_item(db_session, cart.id, seed_data["p3"].id, quantity=1)
+
+        agent = Agent(_FakeLLMClient([TextResponse(text="x")]))
+        snap = agent._cart_snapshot(db_session, session_id)
+        assert snap is not None
+        note = agent._snapshot_note(snap)
+        assert "Running Socks" in note
+        assert "item_id" in note
+        assert "₹499" in note
+
+    def test_empty_cart_no_snapshot(self, db_session, seed_data):
+        from backend.services.ai.agent import Agent
+        from backend.services.ai.llm_client import TextResponse
+
+        agent = Agent(_FakeLLMClient([TextResponse(text="x")]))
+        assert agent._cart_snapshot(db_session, "snapshot-empty") is None
+
+
+class TestRemoveByName:
+    @pytest.mark.asyncio
+    async def test_remove_by_product_name(self, db_session, seed_data):
+        from backend.services.ai.tool_registry import create_tool_registry
+        registry = create_tool_registry()
+        cart = await registry.execute("create_cart", {"merchant_id": 1},
+                                      db=db_session, session_id="rm-sess-1")
+        p3 = seed_data["p3"]
+        await registry.execute("add_to_cart", {
+            "cart_id": cart["cart_id"], "product_id": p3.id, "quantity": 1
+        }, db=db_session, session_id="rm-sess-1")
+
+        result = await registry.execute("remove_from_cart", {
+            "cart_id": cart["cart_id"], "product_name": "socks"
+        }, db=db_session, session_id="rm-sess-1")
+        assert result["item_count"] == 0
+
+    @pytest.mark.asyncio
+    async def test_update_by_product_id(self, db_session, seed_data):
+        from backend.services.ai.tool_registry import create_tool_registry
+        registry = create_tool_registry()
+        cart = await registry.execute("create_cart", {"merchant_id": 1},
+                                      db=db_session, session_id="rm-sess-2")
+        p1 = seed_data["p1"]
+        added = await registry.execute("add_to_cart", {
+            "cart_id": cart["cart_id"], "product_id": p1.id, "quantity": 1
+        }, db=db_session, session_id="rm-sess-2")
+
+        result = await registry.execute("update_quantity", {
+            "cart_id": cart["cart_id"], "product_id": p1.id, "quantity": 3
+        }, db=db_session, session_id="rm-sess-2")
+        assert result["total_paise"] == 449900 * 3
+
+    @pytest.mark.asyncio
+    async def test_remove_no_match_errors(self, db_session, seed_data):
+        from backend.services.ai.tool_registry import create_tool_registry
+        registry = create_tool_registry()
+        cart = await registry.execute("create_cart", {"merchant_id": 1},
+                                      db=db_session, session_id="rm-sess-3")
+        result = await registry.execute("remove_from_cart", {
+            "cart_id": cart["cart_id"], "product_name": "nonexistent thing"
+        }, db=db_session, session_id="rm-sess-3")
+        assert "error" in result
+
+
+class TestUpsellAuditEvents:
+    @pytest.mark.asyncio
+    async def test_offered_and_accepted_logged(self, db_session, seed_data):
+        from backend.services.ai.tool_registry import create_tool_registry
+        from backend.models.audit import AuditEvent
+
+        registry = create_tool_registry()
+        p1 = seed_data["p1"]
+        p3 = seed_data["p3"]
+        cart = await registry.execute("create_cart", {"merchant_id": 1},
+                                      db=db_session, session_id="upsell-audit-1")
+        await registry.execute("add_to_cart", {
+            "cart_id": cart["cart_id"], "product_id": p1.id, "quantity": 1
+        }, db=db_session, session_id="upsell-audit-1")
+        await registry.execute("add_to_cart", {
+            "cart_id": cart["cart_id"], "product_id": p3.id,
+            "quantity": 1, "is_upsell": True
+        }, db=db_session, session_id="upsell-audit-1")
+
+        events = {
+            e.event_type: e
+            for e in db_session.query(AuditEvent).filter(
+                AuditEvent.session_id == "upsell-audit-1"
+            ).all()
+        }
+        assert "UPSELL_OFFERED" in events
+        assert "Running Socks" in events["UPSELL_OFFERED"].event_data["product_names"]
+        assert "UPSELL_ACCEPTED" in events
+        assert events["UPSELL_ACCEPTED"].event_data["product_name"] == "Running Socks"
+
+
 class TestAgentPrompts:
     def test_system_prompt_exists(self):
         from backend.services.ai.prompts import SYSTEM_PROMPT
