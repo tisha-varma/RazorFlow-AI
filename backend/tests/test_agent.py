@@ -721,6 +721,64 @@ class TestUpsellAuditEvents:
         assert events["UPSELL_ACCEPTED"].event_data["product_name"] == "Running Socks"
 
 
+class TestHistoryHydration:
+    def _seed_interactions(self, db_session, seed_data, session_id, n):
+        from backend.models.ai_interaction import AIInteraction
+        merchant_id = seed_data["merchant"].id
+        for i in range(n):
+            db_session.add(AIInteraction(
+                session_id=session_id, merchant_id=merchant_id,
+                interaction_type="search", user_message=f"q{i}",
+                ai_response=f"a{i}", tool_calls=[]
+            ))
+        db_session.commit()
+
+    @pytest.mark.asyncio
+    async def test_cold_agent_reloads_context(self, db_session, seed_data):
+        from backend.services.ai.agent import Agent
+        from backend.services.ai.llm_client import TextResponse
+
+        self._seed_interactions(db_session, seed_data, "hydra-sess-1", 3)
+        agent = Agent(_FakeLLMClient([TextResponse(text="Continuing.")]))
+        assert "hydra-sess-1" not in agent._history
+
+        result = await agent.handle_message(db_session, "hydra-sess-1", "and then?")
+        assert result["response"] == "Continuing."
+        # 3 prior pairs reloaded + the new turn.
+        kinds = [m["role"] for m in agent._history["hydra-sess-1"]]
+        assert kinds[:6] == ["user", "assistant"] * 3
+        assert kinds[-2:] == ["user", "assistant"]
+
+    @pytest.mark.asyncio
+    async def test_hydration_capped(self, db_session, seed_data):
+        from backend.services.ai.agent import Agent
+        from backend.services.ai.llm_client import TextResponse
+
+        self._seed_interactions(db_session, seed_data, "hydra-sess-2", 25)
+        agent = Agent(_FakeLLMClient([TextResponse(text="ok")]))
+        await agent.handle_message(db_session, "hydra-sess-2", "hi")
+        # 10 pairs reloaded + live turn, then trimmed to the 20 cap
+        # (oldest reloaded pair falls off).
+        history = agent._history["hydra-sess-2"]
+        assert len(history) == 20
+        assert history[0] == {"role": "user", "content": "q16"}
+
+    @pytest.mark.asyncio
+    async def test_warm_agent_skips_db_reload(self, db_session, seed_data):
+        from backend.services.ai.agent import Agent
+        from backend.services.ai.llm_client import TextResponse
+
+        self._seed_interactions(db_session, seed_data, "hydra-sess-3", 2)
+        agent = Agent(_FakeLLMClient([
+            TextResponse(text="one"), TextResponse(text="two")
+        ]))
+        await agent.handle_message(db_session, "hydra-sess-3", "first")
+        first_len = len(agent._history["hydra-sess-3"])
+        await agent.handle_message(db_session, "hydra-sess-3", "second")
+        # Second turn appends only its own pair (4 prior + 2 + 2).
+        assert len(agent._history["hydra-sess-3"]) == first_len + 2
+
+
 class TestAgentPrompts:
     def test_system_prompt_exists(self):
         from backend.services.ai.prompts import SYSTEM_PROMPT

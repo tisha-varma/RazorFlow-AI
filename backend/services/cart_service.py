@@ -3,7 +3,6 @@ from backend.models.cart import Cart, CartItem
 from backend.models.product import Product, ProductVariant
 from backend.models.policy import CommercePolicy
 from backend.services.policy_engine import PolicyEngine
-from backend.services.audit_service import AuditService
 from typing import Optional, List, Dict, Any
 
 
@@ -34,31 +33,12 @@ class CartService:
         without a separate policy round trip.
         """
         totals = CartService.calculate_totals(db, cart.id)
+        # The check still runs on every mutation (its result rides the
+        # payload), but it is NOT audit-logged here: one mutation stream
+        # would flood the trail with a POLICY_CHECK per add/remove/tweak.
+        # The meaningful pass/fail is logged once at approval time in
+        # CheckoutService and at the explicit /policy/check endpoint.
         policy = CartService.check_cart_policy(db, cart)
-
-        details = policy["details"] or {}
-        policy_snapshot_id = details.get("policy_snapshot_id")
-        AuditService.log_event(
-            db=db,
-            event_type="POLICY_CHECK_PASSED" if policy["allowed"] else "POLICY_CHECK_FAILED",
-            actor="system",
-            merchant_id=cart.merchant_id,
-            session_id=cart.session_id,
-            event_data={
-                "cart_id": cart.id,
-                "allowed": policy["allowed"],
-                "reason": policy["reason"],
-                "cart_total_paise": totals["total_paise"] if totals else 0,
-                "max_transaction_paise": details.get("max_transaction_paise") or details.get("max_transaction"),
-                "spending_limit_paise": details.get("spending_limit_paise"),
-                "remaining_paise": details.get("remaining_budget"),
-                "policy_snapshot_id": policy_snapshot_id,
-                "policy_snapshot": details
-            },
-            policy_snapshot_id=policy_snapshot_id,
-            related_entity_type="cart",
-            related_entity_id=cart.id
-        )
 
         return {
             "cart": cart,

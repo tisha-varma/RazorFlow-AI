@@ -4,6 +4,7 @@ from datetime import datetime
 
 class PolicyBase(BaseModel):
     max_transaction_amount_paise: int = Field(default=500000, description="Max transaction allowed in paise")
+    min_transaction_amount_paise: int = Field(default=0, description="Min transaction allowed in paise (0 = no floor)")
     require_approval: bool = Field(default=True, description="Explicit approval gate flag")
     max_quantity_per_item: int = Field(default=5, description="Max quantity per individual item")
     allow_upsell: bool = Field(default=True, description="Enable upsell recommendation")
@@ -16,6 +17,7 @@ class PolicyCreate(PolicyBase):
 
 class PolicyUpdate(BaseModel):
     max_transaction_amount_paise: Optional[int] = None
+    min_transaction_amount_paise: Optional[int] = None
     require_approval: Optional[bool] = None
     max_quantity_per_item: Optional[int] = None
     allow_upsell: Optional[bool] = None

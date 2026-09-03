@@ -25,6 +25,7 @@ router = APIRouter(prefix="/demo", tags=["Demo"])
 # Single source for demo policy defaults (not scattered as constants).
 DEMO_POLICY_DEFAULTS = {
     "max_transaction_amount_paise": 500000,   # Rs 5,000
+    "min_transaction_amount_paise": 0,        # no floor
     "require_approval": True,
     "max_quantity_per_item": 5,
     "allow_upsell": True,

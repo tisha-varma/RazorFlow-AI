@@ -124,9 +124,24 @@ export function CommercePanel({
           )}
 
           {products.length === 0 && itemCount === 0 && (
-            <div className="flex flex-col items-center justify-center py-12 text-center">
-              <Package className="h-8 w-8 mb-3 text-slate-300" aria-hidden="true" />
-              <p className="text-sm text-slate-500">Products will appear here as you chat.</p>
+            <div className="flex flex-col items-center justify-center py-12 text-center" aria-live="polite">
+              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-indigo-50 mb-3">
+                <Package className="h-6 w-6 text-indigo-400" aria-hidden="true" />
+              </span>
+              <p className="text-[15px] font-semibold text-slate-700">Waiting for your request…</p>
+              <p className="mt-1 max-w-[240px] text-[13px] leading-relaxed text-slate-500">
+                Ask for anything — shoes, budgets, comparisons. Matching products land here.
+              </p>
+              <div className="mt-3 flex flex-wrap justify-center gap-1.5">
+                {["Marathon shoes", "Trail gear", "Under ₹5,000"].map((hint) => (
+                  <span
+                    key={hint}
+                    className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] text-slate-500"
+                  >
+                    {hint}
+                  </span>
+                ))}
+              </div>
             </div>
           )}
 

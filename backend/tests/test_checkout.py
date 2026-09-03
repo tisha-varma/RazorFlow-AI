@@ -152,6 +152,31 @@ class TestApprovalToken:
         assert good.json()["status"] == "rejected"
 
 
+class TestPolicySnapshot:
+    def test_approval_freezes_policy_values(self, client, seed_data, db_session):
+        from backend.models.approval import Approval
+        from backend.models.policy import CommercePolicy
+
+        appr = TestApprovalToken()._pending_approval(client, seed_data, "snap-sess-1")
+        db_session.expire_all()
+        stored = db_session.query(Approval).filter(
+            Approval.id == appr["id"]).one().summary_json
+        snap = stored["policy_snapshot"]
+        policy = db_session.query(CommercePolicy).first()
+        assert snap["policy_id"] == policy.id
+        assert snap["max_transaction_paise"] == 500000
+        assert snap["spending_limit_paise"] == 1000000
+        assert snap["require_approval"] is True
+
+        # Later tightening must not rewrite history.
+        policy.max_transaction_amount_paise = 300000
+        db_session.commit()
+        db_session.expire_all()
+        reread = db_session.query(Approval).filter(
+            Approval.id == appr["id"]).one().summary_json
+        assert reread["policy_snapshot"]["max_transaction_paise"] == 500000
+
+
 class TestRestartRecovery:
     def _pending_approval(self, client, seed_data, session_id):
         from backend.services.state_machine import state_machine, SessionState

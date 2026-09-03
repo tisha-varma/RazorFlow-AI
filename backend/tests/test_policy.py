@@ -140,12 +140,22 @@ class TestPolicyEngine:
         db_session.commit()
 
         merchant = seed_data["merchant"]
+        p1 = seed_data["p1"]
         p3 = seed_data["p3"]
 
         cart = Cart(session_id="test-sess", merchant_id=merchant.id, status="active")
         db_session.add(cart)
         db_session.flush()
 
+        # A real base item so this tests the upsell CAP, not the
+        # non-upsell-presence rule below.
+        db_session.add(CartItem(
+            cart_id=cart.id,
+            product_id=p1.id,
+            quantity=1,
+            unit_price_paise=449900,
+            is_upsell=False
+        ))
         item = CartItem(
             cart_id=cart.id,
             product_id=p3.id,
@@ -170,3 +180,52 @@ class TestPolicyEngine:
         result = PolicyEngine.check_purchase_policy(db_session, cart.id, "test-sess", policy)
         assert result.allowed is False
         assert "upsell" in result.reason.lower()
+
+    def test_all_upsell_cart_blocked(self, db_session, seed_data):
+        policy = seed_data["policy"]
+        merchant = seed_data["merchant"]
+        p3 = seed_data["p3"]
+
+        cart = Cart(session_id="upsell-only", merchant_id=merchant.id, status="active")
+        db_session.add(cart)
+        db_session.flush()
+        db_session.add(CartItem(
+            cart_id=cart.id, product_id=p3.id, quantity=1,
+            unit_price_paise=49900, is_upsell=True
+        ))
+        db_session.commit()
+
+        result = PolicyEngine.check_purchase_policy(db_session, cart.id, "upsell-only", policy)
+        assert result.allowed is False
+        assert "non-upsell" in result.reason.lower()
+
+    def test_minimum_floor_blocks_and_defaults_open(self, db_session, seed_data):
+        policy = seed_data["policy"]
+        merchant = seed_data["merchant"]
+        p3 = seed_data["p3"]
+
+        def cart_with(price, sess):
+            cart = Cart(session_id=sess, merchant_id=merchant.id, status="active")
+            db_session.add(cart)
+            db_session.flush()
+            db_session.add(CartItem(
+                cart_id=cart.id, product_id=p3.id, quantity=1,
+                unit_price_paise=price, is_upsell=False
+            ))
+            db_session.commit()
+            return cart
+
+        # Default 0 disables the floor.
+        assert policy.min_transaction_amount_paise == 0
+        c1 = cart_with(100, "min-sess-1")
+        assert PolicyEngine.check_purchase_policy(
+            db_session, c1.id, "min-sess-1", policy).allowed is True
+
+        # A set floor blocks trivially small carts.
+        policy.min_transaction_amount_paise = 10000
+        db_session.commit()
+        db_session.refresh(policy)
+        c2 = cart_with(100, "min-sess-2")
+        blocked = PolicyEngine.check_purchase_policy(db_session, c2.id, "min-sess-2", policy)
+        assert blocked.allowed is False
+        assert "minimum" in blocked.reason.lower()

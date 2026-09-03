@@ -12,6 +12,10 @@ class AuditEvent(Base):
     event_data = Column(JSON, default=dict, nullable=False)
     llm_reason_text = Column(Text, nullable=True)
     policy_snapshot_id = Column(String(120), nullable=True)
+    # Tamper-evidence: SHA-256 chain over (prev_hash, event_type,
+    # canonical event_data, actor, session). NULL only on pre-chain rows.
+    prev_hash = Column(String(64), nullable=True)
+    event_hash = Column(String(64), index=True, nullable=True)
     actor = Column(String(20), nullable=False)  # user, ai, system
     timestamp = Column(DateTime, server_default=func.now(), nullable=False)
     related_entity_type = Column(String(50), nullable=True)  # order, cart, product, etc.

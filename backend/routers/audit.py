@@ -8,6 +8,13 @@ from backend.models.audit import AuditEvent
 router = APIRouter(prefix="/audit", tags=["Audit"])
 
 
+@router.get("/verify")
+def verify_trail(db: Session = Depends(get_db)):
+    """Recompute the tamper-evident hash chain. A judge can call this live."""
+    from backend.services.audit_service import AuditService
+    return AuditService.verify_chain(db)
+
+
 @router.get("")
 def list_events(
     session_id: Optional[str] = None,
@@ -42,6 +49,8 @@ def list_events(
             "event_data": e.event_data or {},
             "llm_reason_text": e.llm_reason_text,
             "policy_snapshot_id": e.policy_snapshot_id,
+            "prev_hash": e.prev_hash,
+            "event_hash": e.event_hash,
             "actor": e.actor,
             "timestamp": e.timestamp.isoformat() if e.timestamp else None,
             "related_entity_type": e.related_entity_type,

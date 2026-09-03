@@ -191,6 +191,19 @@ class CheckoutService:
         merchant = db.query(Merchant).first()
         merchant_id = merchant.id if merchant else 1
 
+        # Policy snapshot: reconstructing "what limit was in force" must not
+        # depend on the merchant's CURRENT policy row, which can change.
+        policy_snapshot = None
+        if policy:
+            policy_snapshot = {
+                "policy_id": policy.id,
+                "max_transaction_paise": policy.max_transaction_amount_paise,
+                "min_transaction_paise": policy.min_transaction_amount_paise or 0,
+                "spending_limit_paise": policy.spending_limit_paise,
+                "max_quantity_per_item": policy.max_quantity_per_item,
+                "max_upsell_amount_paise": policy.max_upsell_amount_paise,
+                "require_approval": policy.require_approval
+            }
         approval = Approval(
             session_id=session_id,
             cart_id=cart_id,
@@ -201,7 +214,8 @@ class CheckoutService:
                 "items": totals["items"],
                 "subtotal_paise": totals["subtotal_paise"],
                 "upsell_total_paise": totals.get("upsell_total_paise", 0),
-                "total_paise": totals["total_paise"]
+                "total_paise": totals["total_paise"],
+                "policy_snapshot": policy_snapshot
             }
         )
         db.add(approval)

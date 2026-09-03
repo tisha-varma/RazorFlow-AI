@@ -28,6 +28,7 @@ class PolicyEngine:
             "policy_snapshot_id": snapshot_id,
             "merchant_id": policy.merchant_id,
             "max_transaction_paise": policy.max_transaction_amount_paise,
+            "min_transaction_paise": policy.min_transaction_amount_paise or 0,
             "spending_limit_paise": policy.spending_limit_paise,
             "max_quantity_per_item": policy.max_quantity_per_item,
             "allow_upsell": policy.allow_upsell,
@@ -57,6 +58,14 @@ class PolicyEngine:
         if not cart.items:
             return PolicyResult(allowed=False, reason="Cart is empty")
 
+        # A cart of 100% upsell items is semantically invalid - upsells
+        # must attach to at least one real (non-upsell) purchase.
+        if not any(not item.is_upsell for item in cart.items):
+            return PolicyResult(
+                allowed=False,
+                reason="Cart contains only upsell items - at least one non-upsell item is required"
+            )
+
         # Calculate cart total
         cart_total = sum(item.unit_price_paise * item.quantity for item in cart.items)
 
@@ -78,6 +87,15 @@ class PolicyEngine:
             return PolicyResult(
                 allowed=False,
                 reason=f"Cart total ₹{cart_total/100:.2f} exceeds maximum transaction limit of ₹{policy.max_transaction_amount_paise/100:.2f}",
+                policy_details=policy_details
+            )
+
+        # 1b. Cart total vs minimum transaction amount (0 disables the floor)
+        min_total = policy.min_transaction_amount_paise or 0
+        if min_total and cart_total < min_total:
+            return PolicyResult(
+                allowed=False,
+                reason=f"Cart total ₹{cart_total/100:.2f} is below the minimum transaction limit of ₹{min_total/100:.2f}",
                 policy_details=policy_details
             )
 

@@ -39,6 +39,31 @@ class Agent:
         if len(history) > max_messages:
             self._history[session_id] = history[-max_messages:]
 
+    def _hydrate_history(self, db: Session, session_id: str, max_pairs: int = 10):
+        """Reload conversation context from durable AIInteraction rows.
+
+        The in-memory history is per-process: a restart, a second worker, or
+        a fresh Agent instance would otherwise amnesia the session mid-flow.
+        Only hydrates when this process has no memory of the session yet.
+        """
+        if self._history.get(session_id):
+            return
+        from backend.models.ai_interaction import AIInteraction
+        rows = (
+            db.query(AIInteraction)
+            .filter(AIInteraction.session_id == session_id)
+            .order_by(AIInteraction.id.desc())
+            .limit(max_pairs)
+            .all()
+        )
+        rebuilt: List[Dict[str, Any]] = []
+        for row in reversed(rows):
+            if row.user_message:
+                rebuilt.append({"role": "user", "content": row.user_message})
+            if row.ai_response:
+                rebuilt.append({"role": "assistant", "content": row.ai_response})
+        self._history[session_id] = rebuilt[-20:]
+
     def _remember_search(self, session_id: str, query: str, filters: dict | None) -> None:
         self._last_search[session_id] = {"query": query or "", "filters": filters or {}}
 
@@ -202,6 +227,18 @@ class Agent:
         # Conservative fallback for providers/fakes that omit usage metadata.
         return max(1, len(text) // 4)
 
+    @staticmethod
+    def _trim_result(result: Any, limit: int = 3) -> Any:
+        """Cap stored tool results so the trail stays readable: lists keep
+        their first `limit` items (recursively), dicts pass through."""
+        if isinstance(result, list):
+            return [Agent._trim_result(r, limit) for r in result[:limit]]
+        if isinstance(result, dict):
+            return {k: Agent._trim_result(v, limit) for k, v in result.items()}
+        if isinstance(result, str) and len(result) > 2000:
+            return result[:2000] + "…[truncated]"
+        return result
+
     def _finalize(
         self,
         db: Session,
@@ -210,6 +247,7 @@ class Agent:
         merchant_id: int,
         start_time: float,
         tool_calls_log: list,
+        tool_results_log: list,
         final_text: str,
         products_found: list,
         upsell_products: list,
@@ -232,6 +270,7 @@ class Agent:
             user_message=message,
             ai_response=final_text,
             tool_calls=tool_calls_log,
+            tool_results=tool_results_log,
             tokens_used=tokens_used,
             duration_ms=duration_ms
         )
@@ -258,6 +297,7 @@ class Agent:
     ) -> Dict[str, Any]:
         start_time = time.time()
         tool_calls_log = []
+        tool_results_log = []
         tokens_used = 0
         llm_calls = 0
 
@@ -276,7 +316,9 @@ class Agent:
         if current_state == SessionState.IDLE:
             state_machine.set_state(session_id, SessionState.DISCOVERING)
 
-        # Load conversation history and add new user message
+        # Load conversation history (hydrating from durable rows when this
+        # process has no memory of the session) and add new user message
+        self._hydrate_history(db, session_id)
         history = self._get_history(session_id)
         history.append({"role": "user", "content": message})
 
@@ -302,7 +344,8 @@ class Agent:
         if more is not None:
             return self._finalize(
                 db, session_id, message, merchant_id, start_time,
-                more["tool_calls"], more["response"],
+                more["tool_calls"], [],
+                more["response"],
                 more["products"], [], None,
                 tokens_used=tokens_used,
                 llm_calls=llm_calls
@@ -365,6 +408,10 @@ class Agent:
                             print(f"[Agent] Tool execution failed: {e}")
                             result = f"Error: {e}"
                         tool_calls_log.append({"tool_name": parsed["name"], "arguments": args})
+                        tool_results_log.append({
+                            "tool_name": parsed["name"],
+                            "result": self._trim_result(result)
+                        })
                         tool_result_str = json.dumps(result) if not isinstance(result, str) else result
                         messages.append({"role": "assistant", "content": response.text})
                         messages.append({"role": "tool", "tool_call_id": tc_id, "content": tool_result_str})
@@ -473,6 +520,10 @@ class Agent:
                             db=db,
                             session_id=session_id
                         )
+                        tool_results_log.append({
+                            "tool_name": resp.tool_name,
+                            "result": self._trim_result(result)
+                        })
 
                         # Collect products from search results (deduplicate).
                         # Prefer the LLM's call-level reason; the tool response
@@ -604,7 +655,7 @@ class Agent:
 
         return self._finalize(
             db, session_id, message, merchant_id, start_time,
-            tool_calls_log, final_text,
+            tool_calls_log, tool_results_log, final_text,
             products_found, upsell_products, cart_data,
             tokens_used=tokens_used,
             llm_calls=llm_calls

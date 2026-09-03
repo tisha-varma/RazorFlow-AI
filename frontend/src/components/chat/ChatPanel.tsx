@@ -35,6 +35,41 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     const [input, setInput] = useState("");
     const [loading, setLoading] = useState(false);
     const [activity, setActivity] = useState<string | null>(null);
+    const activityTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+
+    // Optimistic staged feedback while the agent works: the tool_calls list
+    // only arrives post-hoc, so rotate plausible stages client-side until
+    // the response lands. Cleared the moment data arrives.
+    const startActivityCycle = useCallback(() => {
+      const stages = [
+        "Searching catalog…",
+        "Comparing products…",
+        "Checking stock…",
+        "Verifying policy…",
+        "Preparing answer…",
+      ];
+      let i = 0;
+      setActivity(stages[0]);
+      if (activityTimer.current) clearInterval(activityTimer.current);
+      activityTimer.current = setInterval(() => {
+        i = (i + 1) % stages.length;
+        setActivity(stages[i]);
+      }, 1400);
+    }, []);
+
+    const stopActivityCycle = useCallback(() => {
+      if (activityTimer.current) {
+        clearInterval(activityTimer.current);
+        activityTimer.current = null;
+      }
+      setActivity(null);
+    }, []);
+
+    useEffect(() => {
+      return () => {
+        if (activityTimer.current) clearInterval(activityTimer.current);
+      };
+    }, []);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const accumulatedProducts = useRef<Product[]>([]);
     const accumulatedUpsell = useRef<Product[]>([]);
@@ -68,14 +103,14 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       setLoading(true);
 
       try {
-        setActivity("Thinking...");
+        startActivityCycle();
 
         const data = await fetchJson("/agent/chat", {
           method: "POST",
           body: JSON.stringify({ session_id: sessionId, message }),
         });
 
-        setActivity(null);
+        stopActivityCycle();
 
         const assistantMessage: Message = {
           id: crypto.randomUUID(),
@@ -108,7 +143,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
           onApprovalNeeded?.(data.cart.approval_id, data.cart.approval_token ?? null);
         }
       } catch (error) {
-        setActivity(null);
+        stopActivityCycle();
         const errorMessage: Message = {
           id: crypto.randomUUID(),
           role: "assistant",
@@ -120,7 +155,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         setLoading(false);
         loadingRef.current = false;
       }
-    }, [sessionId, onProductsFound, onUpsellFound, fetchCart, onApprovalNeeded]);
+    }, [sessionId, onProductsFound, onUpsellFound, fetchCart, onApprovalNeeded, startActivityCycle, stopActivityCycle]);
 
     useImperativeHandle(ref, () => ({
       sendMessage: sendToAgent,

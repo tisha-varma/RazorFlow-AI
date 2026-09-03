@@ -27,7 +27,7 @@ export function FunnelChart({ stages }: { stages: FunnelStage[] }) {
         <h2 className="text-sm font-semibold text-slate-900">AI commerce funnel</h2>
       </div>
       <p className="mt-1 text-xs text-slate-500">
-        Sessions reaching each stage (cumulative) — drop-off shown between steps.
+        Live demo sessions only — grows as you chat in the buyer view. No sampled data.
       </p>
 
       {max <= 1 && stages.every((s) => s.sessions === 0) ? (

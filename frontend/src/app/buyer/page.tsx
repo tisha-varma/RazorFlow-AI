@@ -23,6 +23,7 @@ export default function BuyerPage() {
   const [approvalToken, setApprovalToken] = useState<string | null>(null);
   const [approvedId, setApprovedId] = useState<number | null>(null);
   const [showAudit, setShowAudit] = useState(false);
+  const [recovery, setRecovery] = useState<null | { kind: "failed" | "stale" }>(null);
   const chatRef = useRef<{ sendMessage: (msg: string) => void } | null>(null);
   const cartRef = useRef<Cart | null>(null);
 
@@ -46,10 +47,28 @@ export default function BuyerPage() {
     const savedSession = localStorage.getItem("razorflow_session_id");
     if (savedSession) {
       setSessionId(savedSession);
-      // Restore cart for persisted session
+      // Restore cart for persisted session, then check whether the
+      // session needs recovery (failed payment or pre-reload approval
+      // whose single-use token is gone with the old page).
       fetchJson(`/agent/session/${savedSession}`)
-        .then((data) => {
-          if (data.cart_id) fetchCart(data.cart_id);
+        .then(async (data) => {
+          if (data.cart_id) {
+            await fetchCart(data.cart_id);
+            if (data.state === "PAYMENT_FAILED") {
+              setRecovery({ kind: "failed" });
+              return;
+            }
+            try {
+              const summary = await fetchJson(
+                `/checkout/summary/${data.cart_id}?session_id=${encodeURIComponent(savedSession)}`
+              );
+              if (summary.status === "pending" && summary.approval_id) {
+                setRecovery({ kind: "stale" });
+              }
+            } catch {
+              /* no summary -> nothing to recover */
+            }
+          }
         })
         .catch(() => {});
     } else {
@@ -265,6 +284,55 @@ export default function BuyerPage() {
           </span>
         </div>
       </header>
+
+      {recovery && (
+        <div
+          className={`px-4 py-3 flex flex-wrap items-center gap-3 border-b ${
+            recovery.kind === "failed"
+              ? "bg-red-50 border-red-200"
+              : "bg-amber-50 border-amber-200"
+          }`}
+          aria-live="polite"
+        >
+          <div className="min-w-0 flex-1">
+            <p className={`text-sm font-semibold ${
+              recovery.kind === "failed" ? "text-red-800" : "text-amber-900"
+            }`}>
+              {recovery.kind === "failed"
+                ? "Payment didn't go through — no charge was made."
+                : "Unfinished approval from before this reload."}
+            </p>
+            <p className={`text-[13px] ${
+              recovery.kind === "failed" ? "text-red-700" : "text-amber-800"
+            }`}>
+              {recovery.kind === "failed"
+                ? "Your cart is intact. Checkout again for a fresh approval, then pay."
+                : "Its single-use token expired with the old page. Checkout again for a fresh approval."}
+            </p>
+          </div>
+          <Button
+            size="sm"
+            onClick={() => {
+              setRecovery(null);
+              setApprovalId(null);
+              setApprovedId(null);
+              handleCheckout();
+            }}
+            className="bg-emerald-600 hover:bg-emerald-500 text-white touch-manipulation"
+          >
+            Checkout again
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label="Dismiss recovery notice"
+            onClick={() => setRecovery(null)}
+            className="text-slate-500 hover:text-slate-900"
+          >
+            Dismiss
+          </Button>
+        </div>
+      )}
 
       <DemoControls sessionId={sessionId} onDone={handleDemoResult} />
 

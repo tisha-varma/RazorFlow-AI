@@ -208,7 +208,7 @@ razorflow-ai/
 ## Known Limitations
 
 - **Single hard-coded merchant (id 1).** Multi-merchant isolation, onboarding, and per-merchant keys are not implemented.
-- **In-memory session state.** The state machine and agent history live in process memory — a backend restart loses conversation state and state-machine position (the DB rows survive).
+- **In-memory session state.** The state machine gate and hot conversation cache live in process memory — run exactly **one** Uvicorn worker (`--workers 1`, the default; never add workers or conversation context splits across processes). Mitigations in place: chat history rehydrates from durable `AIInteraction` rows on any cold session, and approval/payment gates recover their position from `Approval`/`Order` rows after a restart — but live carts and pending turns still die with the process.
 - **SQLite + local file DB.** Fine for demo scale; no migrations (schema changes need a fresh `init_db.py` run), no concurrency hardening.
 - **Groq free-tier quotas.** 5 rotating test keys share ~200K tokens/day; heavy demoing can exhaust them and the chat degrades to error messages until reset.
 - **Razorpay test mode only.** Live keys, refunds, settlements, and dispute handling are not wired. Webhook delivery needs a public tunnel (ngrok/cloudflared) in local dev.
@@ -219,3 +219,4 @@ razorflow-ai/
 - **Synthetic baseline methodology.** The dashboard's "no-upsell baseline" is derived from our own paid orders minus their upsell lines — there is no separate non-AI control group, and it is labeled as such in the API. Conversion rate is paid orders ÷ distinct AI sessions (an approximation; sessions that never touch the assistant aren't counted).
 - **Rate limiting is per-process memory** (120/min/IP on payment + checkout). It does not survive restarts and won't hold across multiple server instances.
 - **Demo triggers synthesize the gateway capture** for the success path (flagged `simulated: true` in audit data) so the stage demo never depends on live LLM output; the Razorpay order itself is real. The failure path exercises the genuine rejection code.
+- **Audit log is hash-chained, not immutable.** Every event carries a SHA-256 link to its predecessor and `GET /api/audit/verify` recomputes the chain live — but a DB admin can still rewrite history (the chain then fails verification at the edited row, which is the point). True write-once immutability would need an append-only store; `POST /api/demo/reset` is also deliberately destructive.
