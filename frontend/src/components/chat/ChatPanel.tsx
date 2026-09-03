@@ -20,7 +20,9 @@ interface Message {
 interface ChatPanelProps {
   sessionId: string;
   onProductsFound?: (products: Product[]) => void;
+  onUpsellFound?: (products: Product[]) => void;
   onCartUpdate?: (cart: Cart) => void;
+  onApprovalNeeded?: (approvalId: number) => void;
 }
 
 export interface ChatPanelHandle {
@@ -28,13 +30,14 @@ export interface ChatPanelHandle {
 }
 
 export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
-  ({ sessionId, onProductsFound, onCartUpdate }, ref) => {
+  ({ sessionId, onProductsFound, onUpsellFound, onCartUpdate, onApprovalNeeded }, ref) => {
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState("");
     const [loading, setLoading] = useState(false);
     const [activity, setActivity] = useState<string | null>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const accumulatedProducts = useRef<Product[]>([]);
+    const accumulatedUpsell = useRef<Product[]>([]);
     const loadingRef = useRef(false);
 
     useEffect(() => {
@@ -93,9 +96,24 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
           }
         }
 
+        // Accumulate upsell products
+        if (data.upsell_products && data.upsell_products.length > 0) {
+          const existingIds = new Set(accumulatedUpsell.current.map((p) => p.id));
+          const newUpsell = data.upsell_products.filter((p: Product) => !existingIds.has(p.id));
+          if (newUpsell.length > 0) {
+            accumulatedUpsell.current = [...accumulatedUpsell.current, ...newUpsell];
+            onUpsellFound?.(accumulatedUpsell.current);
+          }
+        }
+
         // Fetch full cart
         if (data.cart && data.cart.cart_id) {
           await fetchCart(data.cart.cart_id);
+        }
+
+        // Check for approval state
+        if (data.state === "AWAITING_APPROVAL" && data.cart?.approval_id) {
+          onApprovalNeeded?.(data.cart.approval_id);
         }
       } catch (error) {
         setActivity(null);
@@ -110,7 +128,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         setLoading(false);
         loadingRef.current = false;
       }
-    }, [sessionId, onProductsFound, fetchCart]);
+    }, [sessionId, onProductsFound, onUpsellFound, fetchCart, onApprovalNeeded]);
 
     useImperativeHandle(ref, () => ({
       sendMessage: sendToAgent,

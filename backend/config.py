@@ -5,9 +5,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 _backend_dir = Path(__file__).parent
 
 class Settings(BaseSettings):
-    LLM_PROVIDER: str = "ollama"
+    LLM_PROVIDER: str = "groq"
     LLM_API_KEY: str = ""
-    LLM_MODEL: str = "mistral"
+    LLM_MODEL: str = "qwen/qwen3.6-27b"
     LLM_API_KEYS: str = ""  # comma-separated for rotation
 
     # Ollama (local)

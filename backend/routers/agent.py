@@ -9,7 +9,7 @@ from backend.schemas.agent import (
     SessionStateResponse, ToolCallOut
 )
 from backend.services.ai.llm_client import (
-    GroqLLMClient, GeminiLLMClient, OllamaLLMClient, RotatingLLMClient
+    GroqLLMClient, GeminiLLMClient, OllamaLLMClient, RotatingLLMClient, RotatingGroqClient
 )
 from backend.services.ai.agent import Agent
 from backend.services.state_machine import state_machine, SessionState
@@ -31,8 +31,7 @@ def get_agent() -> Agent:
         elif provider == "groq":
             keys = [k.strip() for k in settings.LLM_API_KEYS.split(",") if k.strip()]
             if keys:
-                clients = [GroqLLMClient(api_key=k) for k in keys]
-                llm_client = RotatingLLMClient(clients)
+                llm_client = RotatingGroqClient(api_keys=keys)
             else:
                 llm_client = GroqLLMClient()
 
@@ -72,6 +71,7 @@ async def chat(req: AgentChatRequest, db: Session = Depends(get_db)):
         tool_calls=[ToolCallOut(**tc) for tc in result["tool_calls"]],
         state=result["state"],
         products=result.get("products", []),
+        upsell_products=result.get("upsell_products", []),
         cart=result.get("cart")
     )
 

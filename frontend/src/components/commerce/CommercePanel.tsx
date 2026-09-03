@@ -3,6 +3,7 @@
 import { ProductCard } from "@/components/commerce/ProductCard";
 import { CartSummary } from "@/components/commerce/CartSummary";
 import { UpsellOffer } from "@/components/commerce/UpsellOffer";
+import ApprovalScreen from "@/components/commerce/ApprovalScreen";
 import { Product, Cart } from "@/lib/types";
 import { ShoppingBag, Package, Sparkles } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -11,20 +12,26 @@ interface CommercePanelProps {
   products: Product[];
   cart: Cart | null;
   upsellProducts?: Product[];
+  approvalId?: number | null;
+  sessionId?: string;
   onAddToCart?: (product: Product) => void;
   onUpdateQuantity?: (itemId: number, quantity: number) => void;
   onRemoveItem?: (itemId: number) => void;
   onCheckout?: () => void;
+  onApprovalComplete?: () => void;
 }
 
 export function CommercePanel({
   products,
   cart,
   upsellProducts = [],
+  approvalId = null,
+  sessionId = "",
   onAddToCart,
   onUpdateQuantity,
   onRemoveItem,
   onCheckout,
+  onApprovalComplete,
 }: CommercePanelProps) {
   const itemCount = cart?.items?.length || 0;
 
@@ -46,6 +53,18 @@ export function CommercePanel({
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto">
+        {/* Approval Section - Shows when approval is pending */}
+        {approvalId && sessionId && (
+          <div className="p-4 border-b border-slate-800/50">
+            <ApprovalScreen
+              approvalId={approvalId}
+              sessionId={sessionId}
+              onApprove={() => onApprovalComplete?.()}
+              onReject={() => onApprovalComplete?.()}
+            />
+          </div>
+        )}
+
         {/* Cart Section - Always visible at top */}
         <div className="p-4 border-b border-slate-800/50">
           <CartSummary

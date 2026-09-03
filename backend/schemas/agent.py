@@ -19,6 +19,7 @@ class AgentChatResponse(BaseModel):
     tool_calls: List[ToolCallOut] = Field(default_factory=list)
     state: str
     products: List[dict] = Field(default_factory=list)
+    upsell_products: List[dict] = Field(default_factory=list)
     cart: Optional[dict] = None
 
 

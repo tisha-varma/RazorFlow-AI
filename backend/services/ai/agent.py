@@ -63,6 +63,7 @@ class Agent:
         max_iterations = 6
         final_text = ""
         products_found = []
+        upsell_products = []
         cart_data = None
 
         for iteration in range(max_iterations):
@@ -161,6 +162,14 @@ class Agent:
                                     products_found.append(p)
                                     existing_ids.add(p["id"])
 
+                        # Collect upsell products from get_related_products
+                        if resp.tool_name == "get_related_products" and isinstance(result, list):
+                            existing_ids = {p["id"] for p in upsell_products}
+                            for p in result:
+                                if p["id"] not in existing_ids:
+                                    upsell_products.append(p)
+                                    existing_ids.add(p["id"])
+
                         # Track cart state
                         if resp.tool_name in ("create_cart", "add_to_cart", "remove_from_cart", "calculate_cart"):
                             if isinstance(result, dict) and "cart_id" in result:
@@ -231,5 +240,6 @@ class Agent:
             "tool_calls": tool_calls_log,
             "state": current_state.value,
             "products": products_found[:10],
+            "upsell_products": upsell_products[:5],
             "cart": cart_data
         }

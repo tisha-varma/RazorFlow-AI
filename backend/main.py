@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.config import settings
-from backend.routers import catalog, policy, cart, agent
+from backend.routers import catalog, policy, cart, agent, checkout
 
 app = FastAPI(
     title="RazorFlow AI Backend API",
@@ -23,6 +23,7 @@ app.include_router(catalog.router, prefix="/api")
 app.include_router(policy.router, prefix="/api")
 app.include_router(cart.router, prefix="/api")
 app.include_router(agent.router, prefix="/api")
+app.include_router(checkout.router, prefix="/api")
 
 @app.get("/")
 def read_root():

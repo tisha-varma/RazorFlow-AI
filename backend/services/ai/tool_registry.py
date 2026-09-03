@@ -26,6 +26,21 @@ class ToolRegistry:
             return {"error": f"Unknown tool: {tool_name}"}
 
         handler = self._tools[tool_name]["handler"]
+        # Coerce types based on tool parameter definitions
+        tool_def = self._tools[tool_name]
+        if "parameters" in tool_def and "properties" in tool_def["parameters"]:
+            for param_name, param_def in tool_def["parameters"]["properties"].items():
+                if param_name in arguments:
+                    if param_def.get("type") == "integer":
+                        try:
+                            arguments[param_name] = int(arguments[param_name])
+                        except (ValueError, TypeError):
+                            pass
+                    elif param_def.get("type") == "number":
+                        try:
+                            arguments[param_name] = float(arguments[param_name])
+                        except (ValueError, TypeError):
+                            pass
         try:
             if db is not None:
                 return await handler(db=db, session_id=session_id, **arguments)
@@ -185,7 +200,12 @@ def create_tool_registry() -> ToolRegistry:
                 "name": p.name,
                 "category": p.category,
                 "base_price_paise": p.base_price_paise,
-                "description": p.description
+                "description": p.description,
+                "merchant_id": p.merchant_id,
+                "tags": p.tags or [],
+                "is_active": p.is_active,
+                "in_stock": True,
+                "created_at": str(p.created_at) if hasattr(p, 'created_at') else ""
             }
             for p in products
         ]

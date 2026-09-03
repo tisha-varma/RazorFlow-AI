@@ -129,7 +129,7 @@ class GroqLLMClient(LLMClient):
     def __init__(self, api_key: str = "", model: str = ""):
         try:
             from groq import Groq
-            self.client = Groq(api_key=api_key or settings.LLM_API_KEY)
+            self.client = Groq(api_key=api_key or settings.LLM_API_KEY, timeout=180.0)
             self.model = model or settings.LLM_MODEL
         except Exception as e:
             print(f"[LLM] Warning: Could not initialize Groq client: {e}")
@@ -203,6 +203,101 @@ class GroqLLMClient(LLMClient):
         except Exception as e:
             print(f"[LLM] Groq error: {e}")
             return TextResponse(text="I encountered an error processing your request. Please try again.")
+
+
+class RotatingGroqClient(LLMClient):
+    """Rotates through multiple Groq API keys on rate limit/quota errors."""
+
+    def __init__(self, api_keys: List[str], model: str = ""):
+        from groq import Groq
+        self.clients = []
+        self.model = model or settings.LLM_MODEL
+        for key in api_keys:
+            if key.strip():
+                self.clients.append(Groq(api_key=key.strip(), timeout=180.0))
+        self._current = 0
+        print(f"[LLM] Initialized RotatingGroqClient with {len(self.clients)} keys")
+
+    async def generate(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[ToolDefinition]] = None,
+        system_prompt: Optional[str] = None
+    ) -> LLMResponse | List[LLMResponse]:
+        last_error = None
+        for attempt in range(len(self.clients)):
+            idx = (self._current + attempt) % len(self.clients)
+            client = self.clients[idx]
+            try:
+                result = self._call_groq(client, messages, tools, system_prompt)
+                self._current = idx
+                return result
+            except Exception as e:
+                err_str = str(e).lower()
+                if "rate" in err_str or "limit" in err_str or "quota" in err_str or "429" in err_str:
+                    print(f"[LLM] Key {idx} rate limited, rotating to next...")
+                    last_error = TextResponse(text="Rate limited. Rotating to next API key...")
+                    continue
+                last_error = TextResponse(text=f"LLM error: {str(e)[:100]}")
+                print(f"[LLM] Key {idx} error: {e}")
+                continue
+
+        return last_error or TextResponse(text="All API keys exhausted. Please try again later.")
+
+    def _call_groq(self, client, messages, tools, system_prompt):
+        groq_messages = []
+        if system_prompt:
+            groq_messages.append({"role": "system", "content": system_prompt})
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if role == "tool":
+                groq_messages.append({
+                    "role": "tool",
+                    "tool_call_id": msg.get("tool_call_id", ""),
+                    "content": content
+                })
+            elif role in ("user", "assistant", "system"):
+                groq_messages.append({"role": role, "content": content})
+
+        kwargs = {"model": self.model, "messages": groq_messages}
+
+        if tools:
+            groq_tools = []
+            for tool in tools:
+                groq_tools.append({
+                    "type": "function",
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": tool.parameters
+                    }
+                })
+            kwargs["tools"] = groq_tools
+            kwargs["tool_choice"] = "auto"
+
+        response = client.chat.completions.create(**kwargs)
+        choice = response.choices[0]
+
+        if choice.message.tool_calls:
+            results = []
+            if choice.message.content:
+                results.append(TextResponse(text=choice.message.content))
+            for tc in choice.message.tool_calls:
+                args = {}
+                if tc.function.arguments:
+                    args = json.loads(tc.function.arguments)
+                results.append(ToolCallResponse(
+                    tool_name=tc.function.name,
+                    arguments=args,
+                    tool_call_id=tc.id
+                ))
+            return results
+
+        if choice.message.content:
+            return TextResponse(text=choice.message.content)
+
+        return TextResponse(text="I couldn't generate a response. Please try again.")
 
 
 class GeminiLLMClient(LLMClient):

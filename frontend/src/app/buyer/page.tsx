@@ -13,8 +13,10 @@ import { ArrowLeft, ShieldCheck } from "lucide-react";
 export default function BuyerPage() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
+  const [upsellProducts, setUpsellProducts] = useState<Product[]>([]);
   const [cart, setCart] = useState<Cart | null>(null);
   const [policyActive, setPolicyActive] = useState(false);
+  const [approvalId, setApprovalId] = useState<number | null>(null);
   const chatRef = useRef<{ sendMessage: (msg: string) => void } | null>(null);
   const cartRef = useRef<Cart | null>(null);
 
@@ -24,14 +26,32 @@ export default function BuyerPage() {
   }, [cart]);
 
   useEffect(() => {
-    fetchJson("/agent/session", { method: "POST" })
-      .then((data) => setSessionId(data.session_id))
-      .catch(() => setSessionId("fallback-session-" + Date.now()));
+    const savedSession = localStorage.getItem("razorflow_session_id");
+    if (savedSession) {
+      setSessionId(savedSession);
+      // Restore cart for persisted session
+      fetchJson(`/agent/session/${savedSession}`)
+        .then((data) => {
+          if (data.cart_id) fetchCart(data.cart_id);
+        })
+        .catch(() => {});
+    } else {
+      fetchJson("/agent/session", { method: "POST" })
+        .then((data) => {
+          localStorage.setItem("razorflow_session_id", data.session_id);
+          setSessionId(data.session_id);
+        })
+        .catch(() => {
+          const fallback = "fallback-session-" + Date.now();
+          localStorage.setItem("razorflow_session_id", fallback);
+          setSessionId(fallback);
+        });
+    }
 
     fetchJson("/policy")
       .then(() => setPolicyActive(true))
       .catch(() => setPolicyActive(false));
-  }, []);
+  }, [fetchCart]);
 
   const fetchCart = useCallback(async (cartId: number) => {
     try {
@@ -141,6 +161,13 @@ export default function BuyerPage() {
     }
   }, []);
 
+  const handleApprovalComplete = useCallback(() => {
+    setApprovalId(null);
+    if (chatRef.current) {
+      chatRef.current.sendMessage("Approval completed");
+    }
+  }, []);
+
   if (!sessionId) {
     return (
       <div className="h-screen bg-slate-950 text-white flex items-center justify-center">
@@ -188,17 +215,23 @@ export default function BuyerPage() {
             ref={chatRef}
             sessionId={sessionId}
             onProductsFound={setProducts}
+            onUpsellFound={setUpsellProducts}
             onCartUpdate={setCart}
+            onApprovalNeeded={setApprovalId}
           />
         </div>
         <div className="w-1/2 min-w-0">
           <CommercePanel
             products={products}
             cart={cart}
+            upsellProducts={upsellProducts}
+            approvalId={approvalId}
+            sessionId={sessionId || ""}
             onAddToCart={handleAddToCart}
             onUpdateQuantity={handleUpdateQuantity}
             onRemoveItem={handleRemoveItem}
             onCheckout={handleCheckout}
+            onApprovalComplete={handleApprovalComplete}
           />
         </div>
       </div>
