@@ -5,18 +5,12 @@
 **Discover → Recommend → Upsell → Approve → Pay**
 
 [![Tests: 181 passing](https://img.shields.io/badge/tests-181%20passing-brightgreen)](backend/tests)
-[![Lint: clean](https://img.shields.io/badge/eslint-0%20errors%200%20warnings-brightgreen)](frontend/src)
-[![Build: passing](https://img.shields.io/badge/next%20build-passing-brightgreen)](frontend/src)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Razorpay: test mode](https://img.shields.io/badge/Razorpay-test%20mode-blue)](https://razorpay.com/docs/payments/test-mode/)
 
 RazorFlow AI is an AI-native commerce system that lets an AI buyer understand a merchant's catalog, recommend products, intelligently upsell relevant items, and complete a Razorpay-powered transaction — while keeping every financial action explainable, bounded, and gated.
 
 🎬 **Watch the demo:** https://youtu.be/wim7gSKLrIA
-
-<!-- DEMO VIDEO SPACE: to embed a local recording instead of (or next to)
-     the YouTube link above, drop the file at docs/demo.gif (or docs/demo.mp4)
-     and replace this comment with: ![RazorFlow AI demo](docs/demo.gif) -->
 
 ## 🚀 What is RazorFlow AI?
 
