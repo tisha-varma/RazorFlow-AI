@@ -1,347 +1,594 @@
-# RazorFlow AI
+# ⚡ RazorFlow AI
 
-### Safe Agentic Commerce — AI recommends. Humans approve. Code enforces.
+### The AI Buyer that can safely transact.
 
-RazorFlow AI is a policy-gated AI shopping assistant that lets an AI
-discover products and build carts, while preventing the AI from
-directly authorizing payments.
+**Discover → Recommend → Upsell → Approve → Pay**
 
-Every purchase passes through:
-
-**AI → Cart → Policy Engine → Human Approval → Razorpay → Verification → Audit**
-
-[![Demo Video](https://img.shields.io/badge/Demo-Video-red)](https://youtu.be/wim7gSKLrIA)
 [![Tests: 181 passing](https://img.shields.io/badge/tests-181%20passing-brightgreen)](backend/tests)
+[![Lint: clean](https://img.shields.io/badge/eslint-0%20errors%200%20warnings-brightgreen)](frontend/src)
+[![Build: passing](https://img.shields.io/badge/next%20build-passing-brightgreen)](frontend/src)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Razorpay: test mode](https://img.shields.io/badge/Razorpay-test%20mode-blue)](https://razorpay.com/docs/payments/test-mode/)
 
-## 🎥 Demo
+RazorFlow AI is an AI-native commerce system that lets an AI buyer understand a merchant's catalog, recommend products, intelligently upsell relevant items, and complete a Razorpay-powered transaction — while keeping every financial action explainable, bounded, and gated.
+
+🎬 **Watch the demo:** https://youtu.be/wim7gSKLrIA
 
 <!-- DEMO VIDEO SPACE: to embed a local recording instead of (or next to)
      the YouTube link above, drop the file at docs/demo.gif (or docs/demo.mp4)
      and replace this comment with: ![RazorFlow AI demo](docs/demo.gif) -->
 
-🎬 **Watch:** https://youtu.be/wim7gSKLrIA
+## 🚀 What is RazorFlow AI?
 
-### What you're seeing
+AI can already tell you what to buy.
 
-1. AI recommends products with per-card reasoning
-2. Cart is evaluated against deterministic policies on every change
-3. AI cannot approve the purchase — it can only request an approval
-4. Human explicitly approves (single-use token, itemized summary)
-5. Razorpay processes the payment in test mode
-6. Payment is independently verified (signature + webhook + status poll)
-7. The transaction appears in the hash-chained audit trail and merchant dashboard
+The missing step is:
 
-## What is RazorFlow AI?
+**Can an AI agent safely go from a customer's intent to an actual transaction?**
 
-An AI buyer ("SprintGear AI") for running gear, built on a simple boundary:
-**the LLM is a recommender and explainer — money moves only through
-deterministic code.** A policy engine bounds every cart, a human gate
-stands between AI intent and payment, and every step is written to a
-tamper-evident audit trail. A merchant console then proves what the AI
-earned: revenue, upsell lift, funnel, and orders.
+RazorFlow AI closes that gap.
 
-## Why Agentic Commerce Needs Guardrails
+A customer can simply say:
 
-General-purpose AI agents are persuasive but untrustworthy with money:
-they hallucinate prices, invent availability, and nothing constrains what
-an agent may spend or proves what it did. For agentic commerce to be
-shippable, three questions need mechanical answers, not promises —
-*what stops the AI from spending more? how do failures recover? how is
-every number proven?* RazorFlow AI is that proof.
+> "I need running shoes for marathon training under ₹5,000."
 
-| Traditional AI Shopping Agent | RazorFlow AI            |
-| ----------------------------- | ----------------------- |
-| AI decides what to buy        | AI recommends           |
-| AI-driven purchase flow       | Deterministic checkout  |
-| Trust the model               | Enforce policies        |
-| Approval can be ambiguous     | Explicit human approval |
-| Logs can be altered           | Hash-chained audit      |
-| Payment state can be inferred | Gateway verification    |
+The AI:
 
-> **The AI doesn't need to be trusted, because the architecture doesn't give it the authority to spend.**
+- Understands the customer's intent
+- Searches an AI-readable merchant catalog
+- Compares available products
+- Recommends the best match
+- Suggests a relevant upsell
+- Builds the cart
+- Checks the spending policy
+- Explains the purchase
+- Gets explicit user approval
+- Opens Razorpay Test Mode checkout
+- Verifies the payment
+- Confirms the order
+- Records the complete audit trail
 
-## How It Works
+The merchant gets both a new AI sales channel and measurable visibility into the revenue generated through it.
+
+## 🎯 The Problem
+
+Traditional ecommerce assumes a human is responsible for almost every step:
 
 ```text
-                    MERCHANT
-                       │
-                       ▼
-                Product Catalog
-                       │
-                       ▼
-             AI-Readable Catalog
-                       │
-                       ▼
-CUSTOMER ───────►  AI BUYER
-                       │
-                       ▼
-                Understand Intent
-                       │
-                       ▼
-                Search Catalog
-                       │
-                       ▼
-                Compare Products
-                       │
-                       ▼
-              Recommend Product
-                       │
-                       ▼
-                Add to Cart
-                       │
-                       ▼
-              Upsell / Cross-sell
-                       │
-                       ▼
-                 Final Cart
-                       │
-                       ▼
-                Calculate Total
-                       │
-                       ▼
-                POLICY ENGINE
-                 /          \
-               PASS          FAIL
-                │              │
-                ▼              ▼
-          Approval Gate      BLOCK
-                │
-                ▼
-        User Explicitly Approves
-                │
-                ▼
-          Razorpay Test Mode
-                │
-          ┌─────┴─────┐
-          │           │
-       SUCCESS      FAILURE
-          │           │
-          ▼           ▼
-   Verify Payment   Explain Failure
-          │           │
-          ▼           ▼
-     Order Confirm  Retry/Return
-          │
-          └─────┬─────┘
-                ▼
-           AUDIT TRAIL
-                │
-                ▼
-        MERCHANT DASHBOARD
-                │
-                ▼
-       Revenue / Upsell
+Search
+  ↓
+Compare
+  ↓
+Choose
+  ↓
+Add to cart
+  ↓
+Checkout
+  ↓
+Pay
 ```
 
-## The Core Safety Model
+AI can now handle discovery and recommendation, but most AI shopping experiences stop before the actual transaction.
 
-**AI ≠ payment authority.** The LLM reaches money through exactly one
-tool (`initiate_checkout`), and everything downstream is deterministic:
-totals, policy verdicts, approvals, orders, signature checks.
-System-originated chat messages are answered from fixed text with zero
-LLM calls, so the agent can never hallucinate a paid order.
+That creates a gap between **AI can recommend** and **AI can safely transact**.
 
-## Threat → Defense
+RazorFlow AI is designed to close that loop.
 
-| Threat                       | Defense                                 |
-| ---------------------------- | --------------------------------------- |
-| AI overspends                | Deterministic policy engine             |
-| AI approves its own purchase | Human approval gate                     |
-| Approval replay              | Single-use token                        |
-| Cart amount changes          | Amount equality check + policy re-check |
-| Duplicate payment            | Idempotent order creation               |
-| Payment status spoofing      | Server-side verification                |
-| Webhook replay               | Signature + replay protection           |
-| Silent browser-side decline  | Failure reporting endpoint              |
-| Audit tampering              | SHA-256 hash chain, verifiable live     |
-| LLM outage                   | Provider rotation + retry + fallback    |
-| Demo data misleading judges  | Explicit HIST/DEMO labeling             |
+## 💡 Our Solution
 
-## Key Features
-
-- 💬 Conversational discovery with per-card reasoning, zero-LLM cart ops, automatic upsells with pairing reasons
-- 🛡️ Policy engine (max/min transaction, session limit, quantity + upsell caps), live limit bar, in-buyer settings with the approval gate hard-locked on
-- ✅ Itemized approval screen (limits, remaining budget), single-use tokens, stale-amount expiry, renders via polling — never waits on LLM latency
-- 💳 Razorpay test mode end to end: server-created orders, checkout.js, signature verify, signed webhooks, 30s status polling, same-approval retry with no double charge
-- 📊 Merchant console: revenue / live revenue / conversion over tracked sessions / live-only upsell, With-vs-Without-AI diff, orders, full audit
-- 🔍 Audit trail (What / Why / Amount / Actor / Hash), chain-intact badge, protocol Trace strip, frozen policy snapshots, IST timestamps
-- 🧪 Demo tooling: Reset demo (history-preserving), Simulate decline (in-browser failure card + retry), policy-block trigger
-
-## 🧪 Safety Isn't a Prompt — It's Tested
+RazorFlow AI treats the AI not as a chatbot, but as a controlled commerce agent.
 
 ```text
-181 automated tests
-
-✓ Approval replay protection
-✓ Overspending / policy violations
-✓ Stale cart amounts
-✓ Payment failure handling
-✓ Retry without double charge
-✓ Webhook reconciliation
-✓ Audit-chain verification
-✓ Demo/live revenue separation
-✓ Reset-state preservation
-✓ LLM fallback behavior
+Customer Intent
+      ↓
+AI Buyer
+      ↓
+AI-Readable Catalog
+      ↓
+Product Recommendation
+      ↓
+Upsell / Cross-sell
+      ↓
+Cart
+      ↓
+Policy Engine
+      ↓
+User Approval
+      ↓
+Razorpay Test Mode
+      ↓
+Payment Verification
+      ↓
+Order Confirmation
+      ↓
+Audit Trail
+      ↓
+Merchant Analytics
 ```
 
-```bash
-cd backend
-$env:PYTHONPATH = "C:\projects\RazorFLow AI"   # Windows PowerShell
-.\venv\Scripts\python.exe -m pytest tests/ -q
+## ✨ Core Features
+
+### 🤖 AI Buyer
+
+Customers interact with the merchant using natural language. Examples:
+
+- "I need running shoes under ₹5,000."
+- "Something lightweight for a beginner."
+- "Show me something cheaper."
+- "Add the socks too."
+- "Remove the socks."
+
+The agent understands the request and interacts with the commerce system using structured tools.
+
+### 🧠 Agent-Readable Catalog
+
+Merchant products are represented as structured data that an AI agent can reliably query (15 seeded running-shoe catalog, variants with per-size stock, explicit + tag-based product relations).
+
+The agent does not receive the entire database in its prompt. Instead, it uses catalog tools such as:
+
+```text
+search_products()
+get_product()
+check_stock()
+get_related_products()
 ```
 
-Frontend gates: `npm run lint` (0 errors, 0 warnings) and `npm run build` (offline-safe).
+This makes the merchant's catalog directly consumable by an AI buyer.
 
-## 💳 Payment Flow
+### 🔎 Natural-Language Product Discovery
 
-Razorpay **test mode** (no real money): approve → server creates the
-order → checkout.js modal → success card `4100 2800 0000 1007` /
-decline card `4100 2800 0006 0003` → signature verified against our own
-order records → webhook or browser report reconciles → paid clears the
-cart, failed consumes zero budget, retry reuses the same approval.
+Customers don't need to know product IDs, filters, or catalog terminology. For example:
 
-## 📊 Merchant Console
+Customer: *"I need something for marathon training under ₹5,000."*
 
-Revenue the merchant can prove: total + live-only revenue, conversion
-over tracked sessions (never "approx"), upsell share of live revenue,
-With-vs-Without-AI diff derived from the same real orders (labeled, no
-control group claimed), and the full audit ledger with a live
-chain-verification badge.
+The agent turns this into structured intent such as:
+
+```text
+Category: Running Shoes
+Use case: Marathon
+Budget: ₹5,000
+```
+
+and searches the merchant catalog.
+
+### 🎯 Explainable Product Recommendations
+
+Recommendations are grounded in actual catalog data. Example:
+
+> **Recommended: RunPro Sprint — ₹4,499**
+> It matches your marathon-running requirement, is currently in stock, and stays ₹501 below your ₹5,000 budget.
+
+The AI does not invent prices, stock, discounts, or product specifications.
+
+### 📈 AI Upsell & Cross-sell
+
+After selecting a primary product, the AI checks relevant complementary products. Example:
+
+```text
+RunPro Sprint       ₹4,499
+Running Socks         ₹499
+─────────────────────────
+Final Total          ₹4,998
+```
+
+> "Would you like matching running socks for ₹499? They're a relevant accessory for your selected shoes."
+
+The customer explicitly accepts or rejects the offer. A declined upsell is not repeatedly pushed. We track upsell offers, upsell acceptance, and incremental (live-only) revenue.
+
+### 🛒 Conversational Cart
+
+The cart can be controlled using natural language. Examples:
+
+- "Add two pairs of socks."
+- "Remove the socks."
+- "Change the quantity to two."
+- "What's my total?"
+
+All cart totals are recalculated by the backend from trusted product data — no LLM math near money.
+
+### 🔐 Explainable, Bounded, Gated
+
+This is the core safety model of RazorFlow AI.
+
+**Explainable.** Before payment, the customer sees products, quantity, price, final total, why the product was recommended, why an upsell was suggested, spending limit, policy result, and approval requirement.
+
+**Bounded.** The AI operates within a deterministic commerce policy. Example:
+
+```text
+Maximum transaction: ₹5,000
+Maximum quantity: 5
+Upsells: Enabled
+Maximum upsell: ₹2,000
+Automatic retry: Disabled
+```
+
+If the cart exceeds the allowed amount:
+
+```text
+❌ PURCHASE BLOCKED
+
+Cart total: ₹8,998
+Transaction limit: ₹5,000
+
+The transaction cannot proceed under the current policy.
+```
+
+The AI cannot bypass this restriction.
+
+**Gated.** The AI cannot independently spend money. Before payment:
+
+```text
+┌────────────────────────────────────┐
+│       PAYMENT AUTHORIZATION        │
+│                                    │
+│ RunPro Sprint             ₹4,499  │
+│ Running Socks               ₹499  │
+│                                    │
+│ TOTAL                     ₹4,998  │
+│                                    │
+│ Policy limit              ₹5,000  │
+│ Policy check                   ✓  │
+│                                    │
+│ [ APPROVE PAYMENT — ₹4,998 ]      │
+└────────────────────────────────────┘
+```
+
+The user must explicitly approve the transaction. The backend records the actual approval via single-use tokens. The LLM can never set an approval flag itself.
+
+### 💳 Razorpay Test Mode
+
+After explicit approval:
+
+```text
+User Approval
+      ↓
+Backend Policy Check
+      ↓
+Razorpay Order Creation
+      ↓
+Razorpay Test Checkout
+      ↓
+Payment
+      ↓
+Server Verification
+      ↓
+Order Confirmation
+```
+
+The trusted payment amount is calculated server-side. Razorpay credentials remain server-side. Payment state is verified before the order is considered paid. Signed webhooks (plus browser failure reporting and a 30s status poll) keep payment state synchronized and idempotent.
+
+### 🚨 Graceful Failure Handling
+
+Agentic systems need to handle failure safely. RazorFlow AI deliberately demonstrates a failed payment scenario:
+
+```text
+Payment Started
+      ↓
+❌ Payment Failed
+      ↓
+Recovery State
+```
+
+The customer sees: *"Payment wasn't completed. No order was confirmed and no additional charge was attempted."* Available actions: **Retry Payment** (same approval, fresh Razorpay order — a double charge is structurally impossible) or return to cart. The system never creates a false successful order, silently retries indefinitely, loses the cart, or claims the payment succeeded. The failure is written to the audit trail.
+
+### 🧾 Full Audit Trail
+
+Every important action is recorded:
+
+```text
+USER_INTENT_RECEIVED   "Running shoes for marathon under ₹5,000"
+SEARCH_PERFORMED       4 products found
+PRODUCT_RECOMMENDED    RunPro Sprint — ₹4,499 (with reason)
+UPSELL_OFFERED         Running Socks — ₹499 (with reason)
+UPSELL_ACCEPTED
+POLICY_CHECK           ₹4,998 ≤ ₹5,000
+PAYMENT_APPROVAL_REQUESTED
+PAYMENT_APPROVED       (actor: customer)
+RAZORPAY_ORDER_CREATED
+PAYMENT_SUCCESS
+ORDER_CONFIRMED
+```
+
+The audit trail answers: what did the agent do, why did it do it, what was allowed, what did the user approve, and what happened to the payment. Events are SHA-256 hash-chained and the chain is recomputed live (`GET /api/audit/verify`); every row carries What / Why / Amount / Actor / Policy-hash columns.
+
+### 🏪 Merchant Dashboard
+
+The merchant gets visibility into the AI-powered sales channel: total and live-only revenue, AI conversion over tracked sessions, live upsell revenue and its share of live revenue, With-AI-vs-Without-AI diff, recent transactions (amber `HIST-`/`DEMO-` chips for synthetic rows, emerald `RF-` for live ones), and the audit ledger with a chain-intact badge.
 
 > **Demo data never masquerades as live revenue.**
 > - `RF-*` → live buyer purchases (real test-mode payments)
 > - `HIST-*` → seeded demo history · `DEMO-*` → scripted triggers
 > - Live metrics are calculated only from actual paid orders
 
-## 🛠 Tech Stack
+## 🏗️ Architecture
 
-FastAPI + Pydantic · SQLAlchemy + SQLite (FK-enforced) · Groq
-`qwen/qwen3.6-27b` (5-key rotation, Ollama fallback) · Razorpay test
-mode · Next.js 16 + React 19 + Tailwind + shadcn · Integer paise
-everywhere.
+```mermaid
+flowchart LR
+    U[Customer] --> A[AI Buyer]
 
-## 🚀 Quick Start
+    A --> CT[Catalog Tools]
+    A --> CM[Cart Tools]
+
+    CT --> DB[(SQLite)]
+    CM --> DB
+
+    A --> PE[Policy Engine]
+
+    PE -->|Blocked| B[Explain Block]
+    PE -->|Allowed| AG[Approval Gate]
+
+    AG --> RP[Razorpay Test Mode]
+
+    RP --> PV[Payment Verification]
+
+    PV -->|Success| O[Order Confirmation]
+    PV -->|Failure| F[Graceful Recovery]
+
+    O --> AL[Hash-chained Audit Trail]
+    F --> AL
+
+    M[Merchant Dashboard] --> DB
+    M --> AL
+```
+
+## 🧠 Agent Architecture
+
+The LLM is the reasoning layer — not the source of financial truth.
+
+```text
+                 ┌──────────────┐
+                 │     LLM      │
+                 │              │
+                 │ Understand   │
+                 │ Reason       │
+                 │ Select tools │
+                 └──────┬───────┘
+                        ↓
+                  Tool Registry
+                  (9 tools)
+                        ↓
+        ┌───────────────┼────────────────┐
+        ↓               ↓                ↓
+     Catalog          Cart          Checkout intent
+   (search,         (create,         (initiate,
+    product,        add, update,       approval only)
+    stock,          remove)
+    related)
+        │               │                │
+        └───────────────┼────────────────┘
+                        ↓
+                  Policy Engine
+                  (deterministic)
+                        ↓
+                 Approval Gate
+                 (human + token)
+                        ↓
+                Razorpay Service
+                        ↓
+               Payment Verification
+```
+
+The LLM cannot directly modify the database, bypass policy, change spending limits, mark a payment successful, execute payment without approval, or invent catalog information.
+
+## 🛡️ Security Principles
+
+RazorFlow AI treats the browser and the LLM as untrusted for financial state.
+
+- All trusted totals are calculated server-side; money is stored as integer paise
+- Razorpay secrets never reach the frontend
+- Payment and webhook signatures are verified server-side; duplicates handled idempotently
+- Approval comes from an actual user action via single-use, constant-time-compared tokens
+- Session mismatches are rejected; money routes are rate-limited (120/min/IP)
+- SQLite foreign keys enforced; startup orphan purge; raw backend exceptions are not exposed to customers
+
+## 🧰 Tech Stack
+
+| Layer     | Technology                              |
+|-----------|-----------------------------------------|
+| Frontend  | Next.js 16 + React 19 + TypeScript      |
+| UI        | Tailwind CSS 4 + shadcn/ui + Lucide     |
+| Backend   | Python 3.12 + FastAPI + Pydantic        |
+| Database  | SQLite + SQLAlchemy                     |
+| AI        | Groq `qwen/qwen3.6-27b` (5-key rotation), Ollama + Gemini supported |
+| Payments  | Razorpay Test Mode (orders API + checkout.js + webhooks) |
+| Testing   | Pytest (181 tests) + eslint + `next build` |
+
+## 📁 Project Structure
+
+```text
+RazorFlow-AI/
+│
+├── backend/
+│   ├── models/        # 13 SQLAlchemy models
+│   ├── schemas/       # Pydantic contracts
+│   ├── routers/       # 10 routers: catalog, cart, agent, checkout,
+│   │                  #   payment, policy, audit, dashboard, demo, well-known
+│   ├── services/      # Business logic + ai/ (agent, tools, LLM clients)
+│   ├── tests/         # 10 files, 181 pytest tests
+│   ├── init_db.py     # DB creation + 15-product catalog seed
+│   ├── seed_demo_history.py
+│   └── main.py
+│
+├── frontend/
+│   ├── src/app/       # Pages: landing, buyer, merchant, setup
+│   ├── src/components/# chat, commerce, audit, merchant
+│   ├── src/lib/       # API client, types, IST time helpers
+│   └── public/products/  # 15 product photos
+│
+├── docs/              # architecture, api-contract, policy-spec, state-machine…
+├── .env.example
+├── README.md
+└── .gitignore
+```
+
+## ⚡ Quick Start
+
+### 1. Clone
 
 ```bash
 git clone https://github.com/tisha-varma/RazorFlow-AI.git
 cd RazorFlow-AI
-
-# Backend
-cd backend && python -m venv venv && venv/Scripts/activate && pip install -r requirements.txt
-cp .env.example .env   # add keys (never commit .env)
-python init_db.py && cd .. && backend/venv/Scripts/python.exe -m uvicorn backend.main:app --reload --port 8000
-
-# Frontend (new terminal)
-cd frontend && npm install && npm run dev
 ```
 
-```text
-Buyer:    http://localhost:3000/buyer
-Merchant: http://localhost:3000/merchant
-Setup:    http://localhost:3000/setup
-API Docs: http://localhost:8000/docs
+### 2. Backend
+
+```bash
+cd backend
+python -m venv venv
 ```
 
-> Run exactly **one** backend worker (the default) — state gating is per-process.
+Windows:
 
-Then: chat *"I need shoes under ₹5000"* → accept the upsell → approve →
-pay. Full 2-minute script in [Demo Scenarios](#demo-scenarios).
+```bash
+venv\Scripts\activate
+```
 
-## ⚙️ Environment Variables
+macOS / Linux:
+
+```bash
+source venv/bin/activate
+```
+
+Install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+### 3. Environment Variables
+
+```bash
+cp .env.example .env
+```
+
+Configure:
 
 ```env
 LLM_PROVIDER=groq
 LLM_API_KEYS=key1,key2,key3
+LLM_MODEL=qwen/qwen3.6-27b
+
 RAZORPAY_KEY_ID=
 RAZORPAY_KEY_SECRET=
 RAZORPAY_WEBHOOK_SECRET=
-NEXT_PUBLIC_API_URL=http://localhost:8000/api
-DEMO_MODE=True
 ```
+
+Razorpay credentials must be Test Mode credentials. Never commit `.env`.
+
+### 4. Initialize Database
+
+```bash
+$env:PYTHONPATH = "C:\projects\RazorFLow AI"   # Windows PowerShell (project root)
+backend\venv\Scripts\python.exe backend\init_db.py
+```
+
+This seeds the demo merchant, policy, 15-product catalog, and relationships.
+
+### 5. Run Backend
+
+```bash
+backend\venv\Scripts\python.exe -m uvicorn backend.main:app --reload --port 8000
+```
+
+> Exactly one worker (the default) — state gating is per-process.
+
+API documentation: http://localhost:8000/docs
+
+### 6. Run Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open: http://localhost:3000 → **Start buying with AI**
+
+Buyer: `http://localhost:3000/buyer` · Merchant: `http://localhost:3000/merchant`
+
+## 🧪 Testing
+
+```bash
+cd backend
+$env:PYTHONPATH = "C:\projects\RazorFLow AI"   # Windows PowerShell (project root)
+.\venv\Scripts\python.exe -m pytest tests/ -q
+```
+
+181 tests covering: catalog search, cart calculations, policy boundaries, approval replay protection, stale amounts, payment verification and failure, duplicate webhook handling, retry without double charge, audit-chain verification, demo/live revenue separation, reset preservation, LLM fallback behavior, and agent tools — plus an end-to-end checkout chain.
+
+```bash
+cd frontend
+npm run lint    # 0 errors, 0 warnings
+npm run build   # offline-safe production build
+```
+
+## 🎬 Demo
+
+### Scenario 1 — Successful AI Purchase
+
+Customer: *"I need running shoes for a marathon under ₹5,000."*
+
+The agent understands the request → searches catalog → recommends RunPro Sprint (₹4,499) → offers Running Socks (₹499) → customer accepts → cart ₹4,998 → policy passes → customer approves → Razorpay Test Checkout (card `4100 2800 0000 1007`) → payment verified → order confirmed → audit trail → merchant revenue updated.
+
+### Scenario 2 — Payment Failure
+
+Request → selection → upsell → policy → approval → Razorpay → ❌ payment failure (card `4100 2800 0006 0003`, or the in-buyer **Simulate decline**) → safe recovery card → **Retry payment** on the same approval → audit trail records both attempts.
+
+## ⚙️ Commerce Policy
+
+Default configuration (editable in-buyer or at `/setup`):
+
+| Policy                  | Value      |
+|-------------------------|------------|
+| Maximum transaction     | ₹5,000     |
+| Minimum transaction     | ₹0 (none)  |
+| Approval required       | Yes (locked) |
+| Maximum quantity        | 5          |
+| Upsells                 | Enabled    |
+| Maximum upsell          | ₹2,000     |
+| Automatic payment retry | Disabled   |
+| Session spending limit  | ₹10,000    |
+
+Policies live in the database and are enforced by backend code. Changing one logs a `POLICY_CHANGED` audit event, and every approval freezes the limits in force into its snapshot.
+
+## 🧭 State Machine
 
 ```text
-⚠️ Never commit .env
+IDLE → DISCOVERING → RECOMMENDING → CART_BUILDING → UPSELLING
+  → POLICY_CHECK → AWAITING_APPROVAL → PAYMENT_PENDING
+  → PAYMENT_SUCCESS → ORDER_CONFIRMED
 ```
 
-| Variable | Purpose | Default |
-|----------|---------|---------|
-| `LLM_PROVIDER` | `groq` / `ollama` / `gemini` / `auto` | `groq` |
-| `LLM_MODEL` | Chat model | `qwen/qwen3.6-27b` |
-| `DATABASE_URL` | SQLAlchemy URL (absolute path recommended) | `sqlite:///./razorflow.db` |
+(`PAYMENT_FAILED` loops back to `PAYMENT_PENDING` for retry; invalid transitions return 409.)
 
-Webhooks locally need a tunnel: `cloudflared tunnel --url http://localhost:8000`,
-registered as `https://<id>.trycloudflare.com/api/payment/webhook`
-(events `payment.captured`, `payment.failed`).
+## 📌 Why This Is Different
 
-## 📁 Project Structure
+RazorFlow AI is not trying to be another shopping chatbot. The core idea is to **move AI from recommendation to safe transaction execution**: the AI handles intent → discovery → recommendation → upsell, while the controlled backend handles policy → approval → payment → verification → order. That separation makes agentic commerce practical and trustworthy.
 
-```
-razorflow-ai/
-├── backend/               # FastAPI + SQLAlchemy (63 source files)
-│   ├── models/            # 13 models: cart, order, policy, approval, audit…
-│   ├── schemas/           # Pydantic contracts
-│   ├── routers/           # 10 routers: catalog, cart, agent, checkout,
-│   │                      #   payment, policy, audit, dashboard, demo, well-known
-│   ├── services/          # Business logic, AI agent, policy engine, state machine
-│   ├── tests/             # 10 files, 181 pytest tests
-│   ├── init_db.py         # DB + 15-product catalog seed
-│   └── seed_demo_history.py  # Idempotent HIST-* seeder
-└── frontend/              # Next.js 16 + React 19 + Tailwind + shadcn
-    ├── public/products/   # 15 product photos
-    └── src/
-        ├── app/           # landing, buyer, merchant, setup
-        ├── components/    # chat, commerce, audit, merchant
-        └── lib/           # API client, types, IST time helpers
-```
+## 🧪 Demo Data
 
-## 🔌 API
+The project uses synthetic/demo data for hackathon demonstration: demo merchant, policy, product catalog and relationships, orders, and sessions. Rows are labeled (`HIST-*` seeded history, `DEMO-*` scripted triggers, `RF-*` live test-mode purchases) and live metrics never blend them. No real customer payment credentials or personal data are required.
 
-| Area | Key endpoints | Typical flow |
-|------|---------------|--------------|
-| Catalog | `GET /api/catalog/products`, `GET …/products/{id}/related` | Discover → recommend → upsell |
-| Cart | `POST /api/cart`, `POST /api/cart/{id}/items`, `PUT/DELETE …/items/{item}` | Build cart, totals + policy attached |
-| Agent | `POST /api/agent/chat`, `POST /api/agent/session` | Every chat turn |
-| Checkout | `GET /api/checkout/summary/{cart}`, `POST …/request-approval`, `POST …/approve/{id}` | Mint gate → human decides |
-| Payment | `POST /api/payment/create-order/{approval}`, `POST …/verify`, `POST …/webhook`, `GET …/status/{id}` | Order → pay → confirm → reconcile |
-| Policy | `GET /api/policy`, `GET /api/policy/session-usage`, `PUT /api/policy/{id}` | Limits in, verdicts out |
-| Audit | `GET /api/audit?session_id=…`, `GET /api/audit/verify` | Inspect → verify chain |
-| Dashboard | `GET /api/dashboard/summary` | Merchant proof |
-| Demo (`DEMO_MODE`) | `POST /api/demo/reset`, `…/seed-history`, `…/run-payment-failure`, `…/run-policy-block` | One-click stories |
-| Agent protocol | `GET /.well-known/ai-commerce.json` | Machine-readable storefront |
+## 🗺️ Roadmap
 
-## Demo Scenarios
+- Multi-merchant shopping + per-merchant keys
+- Real user auth (sessions are currently client UUIDs)
+- PostgreSQL + versioned migrations, Redis-backed state
+- Live Razorpay keys, refunds, settlements
+- Order tracking, receipts, voice-based commerce
+- Standardized agent-commerce protocols
 
-1. Happy path: search → upsell → approve → success card → merchant moves
-2. Policy blocked: 2× shoes vs ₹5,000 ceiling — refused before any approval exists
-3. Payment failed: decline card (or **Simulate decline**) → failed card → **Retry**, same approval
-4. Merchant proof: revenue split, With-vs-Without diff, audit chain badge — all live
+## 🚧 Known Limitations
 
-## Limitations & What's Next
+- Payments use Razorpay Test Mode; deployment surface is demo-grade (single merchant, single worker, SQLite, no auth) while the safety model is production-shaped.
+- Metrics are honest at small scale: derived baselines, tracked-session conversion, labeled synthetic rows — not statistically powered.
 
-> RazorFlow AI is a demo implementation with a production-shaped safety architecture.
+## 🏆 Built For
 
-- Auth, multi-merchant, Postgres/Redis, live keys + refunds, shipment tracking → planned (see issues)
-- Metrics are honest at small scale: derived baselines, tracked-session conversion, labeled synthetic rows
+**Razorpay Buildathon — Track 01, AI Growth & Agentic Commerce.** Grow the merchant's revenue, and make them sellable to AI buyers: AI-native discovery, revenue-generating upsells, safe agentic transactions.
 
-Found a bug? Open an issue — reproduce + expected vs actual is enough. PRs: cover backend changes with pytest, keep `npm run lint`/`build` clean, never commit `.env`, `*.db`, or keys.
+## 👩‍💻 Author
 
-## Engineering Notes
+**Tisha Varma** — GitHub: [@tisha-varma](https://github.com/tisha-varma) — Project: [RazorFlow-AI](https://github.com/tisha-varma/RazorFlow-AI)
 
-<details><summary>How this was built (condensed)</summary>
-
-- Phased delivery (0–5) then review-driven hardening rounds; test suite grew 40 → 181.
-- Load-bearing fixes along the way: FK enforcement + orphan purge (phantom carts), audit-verify repair, gate polling decoupled from LLM latency, provider-failure retries, browser failure reporting, history-preserving resets, IST timestamps, offline-safe build.
-- Conventions: integer paise, `SessionState` enum + transition graph, service-per-concern modules, review-ID comments at challenged lines.
-
-</details>
-
-## License
-
-This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
-
-## Acknowledgments
-
-- [Razorpay](https://razorpay.com) test mode + Python SDK
-- [Groq](https://groq.com) free-tier inference
-- [FastAPI](https://fastapi.tiangolo.com), [Next.js](https://nextjs.org), [shadcn/ui](https://ui.shadcn.com), [Tailwind CSS](https://tailwindcss.com), [Lucide](https://lucide.dev)
+⭐ If you find the project interesting, star the repository and follow it as it evolves toward AI-native commerce.
