@@ -101,7 +101,40 @@ class TestDashboardSummary:
         # 3 paid orders / 3 distinct AI sessions.
         assert data["conversion_sessions"] == 3
         assert data["conversion_rate_pct"] == 100.0
-        assert "Approx" in data["conversion_note"] or "approx" in data["conversion_note"].lower()
+        assert "approx" not in data["conversion_note"].lower()
+        assert "tracked" in data["conversion_note"].lower()
+
+    def test_demo_prefixes_excluded_from_live(self, client, db_session, seed_data):
+        from backend.models.cart import Cart
+        from backend.models.order import Order
+        merchant = seed_data["merchant"]
+        cart = Cart(session_id="demo-x", merchant_id=merchant.id, status="checked_out")
+        db_session.add(cart)
+        db_session.flush()
+        for number in ("HIST-900", "DEMO-9-XXXXXX"):
+            db_session.add(Order(
+                order_number=number, merchant_id=merchant.id, customer_id="c",
+                session_id="demo-x", cart_id=cart.id, subtotal_paise=10000,
+                total_paise=10000, status="paid", is_ai_assisted=True,
+                upsell_revenue_paise=0))
+        db_session.commit()
+        all_time = client.get(
+            "/api/dashboard/summary", params={"merchant_id": merchant.id}).json()["all_time"]
+        assert all_time["demo_order_count"] == 2
+        assert all_time["live_order_count"] == 0
+        assert all_time["live_revenue_paise"] == 0
+
+    def test_live_upsell_split(self, client, db_session, seed_data):
+        merchant = _seed_orders(db_session, seed_data)
+        all_time = client.get(
+            "/api/dashboard/summary", params={"merchant_id": merchant.id}).json()["all_time"]
+        # No HIST-* rows here: everything is live.
+        assert all_time["demo_order_count"] == 0
+        assert all_time["live_order_count"] == 3
+        assert all_time["live_revenue_paise"] == 449900 + 499800 + 299900
+        # Only o2 carries an upsell line (p3, 49900) on a live order.
+        assert all_time["live_upsell_revenue_paise"] == 49900
+        assert all_time["live_upsell_pct"] == round(49900 / 1249600 * 100, 1)
 
     def test_recent_orders_table(self, client, db_session, seed_data):
         merchant = _seed_orders(db_session, seed_data)

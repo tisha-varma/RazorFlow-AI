@@ -107,6 +107,13 @@ export function CommercePanel({
           />
         </div>
 
+        {/* Upsell Section — first: it converts best right after an add */}
+        {upsellProducts.length > 0 && (
+          <div className="px-4 pt-4">
+            <UpsellOffer products={upsellProducts} onAddToCart={onAddToCart} />
+          </div>
+        )}
+
         {/* Products Section */}
         <div className="p-4">
           {products.length > 0 && (
@@ -147,13 +154,6 @@ export function CommercePanel({
                   </span>
                 ))}
               </div>
-            </div>
-          )}
-
-          {/* Upsell Section */}
-          {upsellProducts.length > 0 && (
-            <div className="mt-4">
-              <UpsellOffer products={upsellProducts} onAddToCart={onAddToCart} />
             </div>
           )}
         </div>

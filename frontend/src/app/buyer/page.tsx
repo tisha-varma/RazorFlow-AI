@@ -249,10 +249,10 @@ export default function BuyerPage() {
   }, [sessionId, cart?.id, cartItemCount, approvalId, approvedId, handleApprovalNeeded]);
 
   // Deterministic judge-state reset: clears this session's carts, orders,
-  // approvals, and trail rows, restores policy defaults (server-side), and
-  // reseeds merchant demo history — then mints a fresh session so budget,
-  // cart, and gate all start perfect. Each step is best-effort; the reload
-  // is what guarantees a clean client.
+  // approvals, and trail rows and restores policy defaults (server-side) —
+  // then mints a fresh session so budget, cart, and gate all start perfect.
+  // Deliberately does NOT reseed demo history: after a wipe the dashboard
+  // stays honestly empty until real purchases land.
   const [resetting, setResetting] = useState(false);
   const handleNewSession = useCallback(async () => {
     setResetting(true);
@@ -263,11 +263,6 @@ export default function BuyerPage() {
         });
       } catch {
         /* session cleanup is a bonus — the reload still gives a clean client */
-      }
-      try {
-        await fetchJson("/demo/seed-history?count=24", { method: "POST" });
-      } catch {
-        /* history reseed is a bonus — merchant self-seeds when empty */
       }
     }
     localStorage.removeItem("razorflow_session_id");
@@ -424,7 +419,7 @@ export default function BuyerPage() {
             size="sm"
             onClick={handleNewSession}
             disabled={resetting}
-            title="Reset to perfect judge state: clears this session, restores policy defaults, reseeds demo history, starts fresh"
+            title="Fresh session + default limits. Paid orders and audit history are preserved."
             className="rounded-full border border-amber-300 bg-amber-50 text-amber-800 hover:text-amber-900 hover:bg-amber-100"
           >
             <RotateCcw className={`h-3.5 w-3.5 mr-1 ${resetting ? "animate-spin" : ""}`} aria-hidden="true" />

@@ -15,13 +15,6 @@ export default function Home() {
     spending_limit_paise: number;
     require_approval: boolean;
   } | null>(null);
-  const [stats, setStats] = useState<{
-    order_count: number;
-    total_revenue_paise: number;
-    aov_uplift_pct: number;
-    upsell_revenue_paise: number;
-  } | null>(null);
-
   useEffect(() => {
     fetchJson("/policy")
       .then((data) => {
@@ -32,12 +25,6 @@ export default function Home() {
         // API offline or no active policy yet
         setPolicyStatus("setup_required");
       });
-    // Live merchant proof for the first screen — silent when unreachable.
-    fetchJson("/dashboard/summary?merchant_id=1")
-      .then((data) => {
-        if (data?.all_time) setStats(data.all_time);
-      })
-      .catch(() => {});
   }, []);
 
   return (
@@ -95,34 +82,6 @@ export default function Home() {
             AI chat increases average order value through explainable upsells —
             every rupee gated by policy, approved by a human, paid on Razorpay test mode.
           </p>
-          {stats && stats.order_count > 0 && (
-            <div className="mx-auto mt-6 flex max-w-xl items-stretch justify-center gap-3" aria-live="polite">
-              {[
-                {
-                  value: `${stats.order_count}`,
-                  label: "paid orders",
-                },
-                {
-                  value: `₹${(stats.total_revenue_paise / 100).toLocaleString("en-IN")}`,
-                  label: "merchant revenue",
-                },
-                {
-                  value: `+${stats.aov_uplift_pct}%`,
-                  label: "AOV lift from upsells",
-                },
-              ].map((s) => (
-                <div
-                  key={s.label}
-                  className="flex-1 rounded-2xl border border-slate-200/80 bg-white px-3 py-3 shadow-[0_8px_24px_-12px_rgba(15,23,42,0.25)]"
-                >
-                  <p className="text-xl font-extrabold tabular-nums text-slate-900">
-                    {s.value}
-                  </p>
-                  <p className="mt-0.5 text-[11px] font-medium text-slate-500">{s.label}</p>
-                </div>
-              ))}
-            </div>
-          )}
           <Link href="/buyer" className="mt-8 inline-flex">
             <Button className="h-12 px-8 text-base bg-blue-700 hover:bg-blue-600 text-white shadow-sm touch-manipulation">
               Start buying with AI
@@ -134,39 +93,14 @@ export default function Home() {
         {/* Option Cards */}
         <div className="grid md:grid-cols-3 gap-6 w-full max-w-5xl mt-4">
 
-          {/* Card 1: AI Buyer */}
-          <Card className="bg-white border-slate-200 shadow-md hover:shadow-lg transition-all duration-300 flex flex-col group relative overflow-hidden">
-            <div className="absolute top-0 left-0 w-full h-[3px] bg-blue-600" />
-            <CardHeader>
-              <div className="h-12 w-12 rounded-xl bg-indigo-100 flex items-center justify-center text-indigo-700 mb-2">
-                <ShoppingBag className="h-6 w-6" />
-              </div>
-              <CardTitle className="text-xl text-slate-900">1. AI Buyer Client</CardTitle>
-              <CardDescription className="text-slate-500">
-                Engage in natural-language commerce. Discover running gear, get recommended items, and approve purchases.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="flex-1 text-sm text-slate-500">
-              <p>Experience safe agentic checkout with Razorpay. Try searching: <i>&ldquo;I need daily trainers under ₹5,000&rdquo;</i>.</p>
-            </CardContent>
-            <CardFooter className="pt-2">
-              <Link href="/buyer" className="w-full">
-                <Button className="w-full bg-blue-700 hover:bg-blue-600 text-white group/btn">
-                  Launch AI Buyer
-                  <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover/btn:translate-x-1" />
-                </Button>
-              </Link>
-            </CardFooter>
-          </Card>
-
-          {/* Card 2: Setup Policy (Phase 1-2 Requirement) */}
+          {/* Card 1: Setup Policy (Phase 1-2 Requirement) */}
           <Card className="bg-white border-slate-200 shadow-md hover:shadow-lg transition-all duration-300 flex flex-col group relative overflow-hidden">
             <div className="absolute top-0 left-0 w-full h-[3px] bg-amber-500" />
             <CardHeader>
               <div className="h-12 w-12 rounded-xl bg-amber-100 flex items-center justify-center text-amber-700 mb-2">
                 <Settings className="h-6 w-6" />
               </div>
-              <CardTitle className="text-xl text-slate-900">2. Configure Policy</CardTitle>
+              <CardTitle className="text-xl text-slate-900">1. Configure Policy</CardTitle>
               <CardDescription className="text-slate-500">
                 Define the rules: max amounts, session spending limits, item quantities, and upsell configurations.
               </CardDescription>
@@ -186,6 +120,31 @@ export default function Home() {
               <Link href="/setup" className="w-full">
                 <Button variant={policyStatus === "setup_required" ? "default" : "secondary"} className={`w-full group/btn ${policyStatus === "setup_required" ? "bg-amber-600 hover:bg-amber-500 text-white" : ""}`}>
                   {policyStatus === "setup_required" ? "Start Policy Setup" : "Edit Policy Settings"}
+                  <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover/btn:translate-x-1" />
+                </Button>
+              </Link>
+            </CardFooter>
+          </Card>
+
+          {/* Card 2: AI Buyer */}
+          <Card className="bg-white border-slate-200 shadow-md hover:shadow-lg transition-all duration-300 flex flex-col group relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-full h-[3px] bg-blue-600" />
+            <CardHeader>
+              <div className="h-12 w-12 rounded-xl bg-indigo-100 flex items-center justify-center text-indigo-700 mb-2">
+                <ShoppingBag className="h-6 w-6" />
+              </div>
+              <CardTitle className="text-xl text-slate-900">2. AI Buyer Client</CardTitle>
+              <CardDescription className="text-slate-500">
+                Engage in natural-language commerce. Discover running gear, get recommended items, and approve purchases.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex-1 text-sm text-slate-500">
+              <p>Experience safe agentic checkout with Razorpay. Try searching: <i>&ldquo;I need daily trainers under ₹5,000&rdquo;</i>.</p>
+            </CardContent>
+            <CardFooter className="pt-2">
+              <Link href="/buyer" className="w-full">
+                <Button className="w-full bg-blue-700 hover:bg-blue-600 text-white group/btn">
+                  Launch AI Buyer
                   <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover/btn:translate-x-1" />
                 </Button>
               </Link>

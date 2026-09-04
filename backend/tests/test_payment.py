@@ -515,6 +515,66 @@ class TestWebhook:
         assert "unknown" in resp.json()["detail"]
 
 
+class TestReportFailure:
+    def test_gateway_failure_marks_failed_with_audit(
+        self, client, db_session, seed_data, monkeypatch):
+        from backend.models.order import Order
+        from backend.models.audit import AuditEvent
+
+        appr, data = TestVerify()._order_for(
+            client, seed_data, monkeypatch, "pay-rf-1", "order_rf1")
+        resp = client.post("/api/payment/report-failure", json={
+            "razorpay_order_id": "order_rf1",
+            "session_id": "pay-rf-1",
+            "reason": "card_declined",
+            "razorpay_payment_id": "pay_rf1",
+        })
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "failed"
+        assert state_machine.get_state("pay-rf-1") == SessionState.PAYMENT_FAILED
+
+        db_session.expire_all()
+        order = db_session.query(Order).filter(Order.session_id == "pay-rf-1").one()
+        assert order.status == "failed"
+        failed = db_session.query(AuditEvent).filter(
+            AuditEvent.event_type == "PAYMENT_FAILED",
+            AuditEvent.related_entity_id == order.id).all()
+        assert len(failed) == 1
+        assert failed[0].event_data["reason"] == "card_declined"
+
+    def test_report_failure_never_downgrades_paid(self, client, seed_data, monkeypatch):
+        appr, data = TestVerify()._order_for(
+            client, seed_data, monkeypatch, "pay-rf-2", "order_rf2")
+        client.post("/api/payment/verify", json={
+            "razorpay_order_id": "order_rf2",
+            "razorpay_payment_id": "pay_ok",
+            "razorpay_signature": "sig",
+            "session_id": "pay-rf-2",
+        })
+        resp = client.post("/api/payment/report-failure", json={
+            "razorpay_order_id": "order_rf2",
+            "session_id": "pay-rf-2",
+            "reason": "late duplicate failure",
+        })
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "paid"
+
+    def test_report_failure_unknown_order_404(self, client):
+        resp = client.post("/api/payment/report-failure", json={
+            "razorpay_order_id": "order_nope",
+            "session_id": "pay-rf-3",
+        })
+        assert resp.status_code == 404
+
+    def test_report_failure_session_mismatch_403(self, client, seed_data, monkeypatch):
+        TestVerify()._order_for(client, seed_data, monkeypatch, "pay-rf-4", "order_rf4")
+        resp = client.post("/api/payment/report-failure", json={
+            "razorpay_order_id": "order_rf4",
+            "session_id": "someone-else",
+        })
+        assert resp.status_code == 403
+
+
 class TestPaymentStatus:
     def test_pending_then_paid(self, client, seed_data, monkeypatch):
         appr, data = TestVerify()._order_for(

@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { AuditTrail } from "@/components/audit/AuditTrail";
+import { formatDateTimeIST } from "@/lib/time";
 import { ImpactChart } from "@/components/merchant/ImpactChart";
-import { FunnelChart, type FunnelStage } from "@/components/merchant/FunnelChart";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -15,7 +15,6 @@ import {
   Gift,
   Percent,
   Store,
-  History,
   RefreshCw,
 } from "lucide-react";
 
@@ -27,6 +26,8 @@ interface PeriodStats {
   demo_revenue_paise: number;
   live_order_count: number;
   live_revenue_paise: number;
+  live_upsell_revenue_paise: number;
+  live_upsell_pct: number;
   upsell_revenue_paise: number;
   upsell_pct: number;
   avg_order_value_paise: number;
@@ -65,16 +66,8 @@ function formatPaise(paise: number): string {
 }
 
 function timeFor(timestamp?: string | null): string {
-  if (!timestamp) return "—";
-  const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleString("en-IN", {
-    day: "numeric",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
+  // Stored timestamps are UTC-naive — render IST (see lib/time).
+  return formatDateTimeIST(timestamp);
 }
 
 const STATUS_STYLES: Record<string, string> = {
@@ -89,81 +82,47 @@ function StatCard({
   label,
   value,
   sub,
-  tile,
-  bar,
 }: {
   icon: typeof Banknote;
   label: string;
   value: string;
   sub?: string;
-  tile: string;
-  bar: string;
 }) {
   return (
-    <div className="group relative overflow-hidden rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md">
-      <div className={`absolute inset-x-0 top-0 h-1 ${bar}`} aria-hidden="true" />
-      <div className="flex items-center gap-2.5">
-        <span className={`flex h-9 w-9 items-center justify-center rounded-lg ${tile} text-white`}>
+    <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm transition-colors hover:border-blue-300 hover:bg-blue-50/40">
+      <div className="flex items-center gap-2">
+        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600 text-white">
           <Icon className="h-4 w-4" aria-hidden="true" />
         </span>
-        <span className="text-[13px] font-medium text-slate-500">{label}</span>
+        <span className="text-xs font-medium text-slate-500">{label}</span>
       </div>
-      <p className="mt-2.5 text-[26px] font-extrabold tabular-nums leading-none text-slate-900">{value}</p>
-      {sub && <p className="mt-1.5 text-xs tabular-nums text-slate-500">{sub}</p>}
+      <p className="mt-2 text-[22px] font-bold tabular-nums leading-none text-slate-900">{value}</p>
+      {sub && <p className="mt-1 text-[11px] tabular-nums text-slate-500">{sub}</p>}
     </div>
   );
 }
 
 export default function MerchantPage() {
   const [summary, setSummary] = useState<Summary | null>(null);
-  const [funnel, setFunnel] = useState<FunnelStage[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [funnelError, setFunnelError] = useState<string | null>(null);
-  const [seeding, setSeeding] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const seededOnce = useRef(false);
 
   const loadDashboard = useCallback(async () => {
-    // Panels fail independently: a funnel outage must never blank revenue.
-    const [summaryRes, funnelRes] = await Promise.all([
-      fetch(`${API_BASE}/dashboard/summary?merchant_id=1`),
-      fetch(`${API_BASE}/dashboard/funnel?merchant_id=1`),
-    ]);
+    const summaryRes = await fetch(`${API_BASE}/dashboard/summary?merchant_id=1`);
     if (!summaryRes.ok) throw new Error("Could not load dashboard");
     const data: Summary = await summaryRes.json();
     setSummary(data);
-    if (funnelRes.ok) {
-      setFunnel((await funnelRes.json()).stages ?? []);
-      setFunnelError(null);
-    } else {
-      setFunnelError("Funnel unavailable — revenue above is unaffected.");
-    }
     return data;
   }, []);
 
+  // NOTE: this page deliberately does NOT auto-seed. An empty dashboard is
+  // the honest fresh state — seed explicitly via POST /demo/seed-history,
+  // the buyer Reset-demo button, or /judge. (Auto-seed once fought a
+  // deliberate merchant-wide wipe by refilling HIST rows within seconds.)
   const fetchDashboard = useCallback(async () => {
     try {
-      const data = await loadDashboard();
+      await loadDashboard();
       setError(null);
-      // Never show an empty dashboard: seed deterministic HIST-* history
-      // once per visit when there are no paid orders (e.g. fresh DB or
-      // after a merchant-wide demo reset). Idempotent server-side.
-      if (!seededOnce.current && data.all_time.order_count === 0) {
-        seededOnce.current = true;
-        setSeeding(true);
-        try {
-          const seedRes = await fetch(`${API_BASE}/demo/seed-history?count=24`, {
-            method: "POST",
-          });
-          if (seedRes.ok) {
-            await loadDashboard();
-          }
-        } catch {
-          /* seed is a bonus — empty state still renders */
-        } finally {
-          setSeeding(false);
-        }
-      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load dashboard");
     }
@@ -185,12 +144,10 @@ export default function MerchantPage() {
   }, [fetchDashboard]);
 
   const all = summary?.all_time;
-  const hasDemoData = (summary?.recent_orders ?? []).some((o) =>
-    o.order_number.startsWith("HIST-")
-  );
 
   return (
-    <div className="relative min-h-screen text-slate-900 flex flex-col bg-stone-100">
+    <div className="relative min-h-screen text-slate-900 flex flex-col bg-[#F9FAFB]">
+      <div className="h-1 bg-blue-600" aria-hidden="true" />
       <header className="relative border-b border-slate-200/80 bg-white/85 backdrop-blur-md px-4 py-3 flex items-center gap-4 z-50 shadow-[0_1px_12px_rgba(15,23,42,0.06)]">
         <Link href="/">
           <Button variant="ghost" size="sm" className="rounded-full text-slate-500 hover:text-slate-900 hover:bg-slate-100">
@@ -228,12 +185,6 @@ export default function MerchantPage() {
             <RefreshCw className={`h-3.5 w-3.5 mr-1 ${refreshing ? "animate-spin" : ""}`} aria-hidden="true" />
             Refresh
           </Button>
-          {hasDemoData && (
-            <Badge variant="outline" className="gap-1 rounded-full border-amber-300 bg-amber-50 text-[11px] text-amber-800" title="HIST-* rows are deterministic demo history; live orders appear as RF-*">
-              <History className="h-3 w-3" aria-hidden="true" />
-              Demo history included
-            </Badge>
-          )}
           <Badge variant="outline" className="gap-1.5 rounded-full border-emerald-300 bg-emerald-50 text-xs text-emerald-700">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" aria-hidden="true" />
             Live
@@ -241,90 +192,64 @@ export default function MerchantPage() {
         </div>
       </header>
 
-      <div className="relative mx-auto w-full max-w-5xl space-y-4 p-4 md:p-6">
+      <div className="relative mx-auto w-full max-w-6xl space-y-3 p-3 md:p-4">
         {error && (
           <div className="rounded-2xl border border-red-300 bg-red-50 p-3 text-sm text-red-700 shadow-sm">
             {error}
           </div>
         )}
-        {seeding && (
-          <div className="rounded-2xl border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-800 shadow-sm" aria-live="polite">
-            Loading demo history so the dashboard never opens empty…
+        {all && all.order_count === 0 && !error && (
+          <div className="rounded-xl border border-dashed border-slate-300 bg-white p-4 text-center text-[13px] text-slate-500" aria-live="polite">
+            Fresh database — no orders yet. Complete a purchase in the buyer view,
+            or seed labeled demo history via <span className="font-mono">POST /demo/seed-history</span>.
           </div>
         )}
 
-        {/* Stat cards */}
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {/* Stat cards — dense, single brand color */}
+        <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
           <StatCard
             icon={Banknote}
             label="Total revenue"
             value={all ? formatPaise(all.total_revenue_paise) : "—"}
-            sub={
-              all
-                ? `Live ${formatPaise(all.live_revenue_paise)} (${all.live_order_count}) · demo ${formatPaise(all.demo_revenue_paise)} (${all.demo_order_count})`
-                : undefined
-            }
-            tile="bg-emerald-600"
-            bar="bg-emerald-500"
+            sub={all ? `${all.order_count} paid orders` : undefined}
           />
           <StatCard
             icon={Receipt}
-            label="Avg order value"
-            value={all ? formatPaise(all.avg_order_value_paise) : "—"}
-            sub={all ? `${all.order_count} paid orders · ${all.ai_assisted_orders} AI-assisted` : undefined}
-            tile="bg-blue-700"
-            bar="bg-blue-600"
+            label="Live revenue"
+            value={all ? formatPaise(all.live_revenue_paise) : "—"}
+            sub={all ? `${all.live_order_count} live orders` : undefined}
           />
           <StatCard
             icon={Percent}
             label="AI conversion"
             value={summary ? `${summary.conversion_rate_pct}%` : "—"}
-            sub={summary ? `${summary.conversion_sessions} AI sessions (approx)` : undefined}
-            tile="bg-sky-600"
-            bar="bg-sky-500"
+            sub={summary ? `${summary.conversion_sessions} tracked sessions` : undefined}
           />
           <StatCard
             icon={Gift}
             label="Upsell revenue"
-            value={all ? formatPaise(all.upsell_revenue_paise) : "—"}
-            sub={all ? `${all.upsell_pct}% of revenue` : undefined}
-            tile="bg-amber-600"
-            bar="bg-amber-500"
+            value={all ? formatPaise(all.live_upsell_revenue_paise) : "—"}
+            sub={all ? `${all.live_upsell_pct}% of live revenue` : undefined}
           />
         </div>
 
         {all && (
           <ImpactChart
-            avgOrderValuePaise={all.avg_order_value_paise}
-            baselineAovPaise={all.baseline_aov_paise}
-            baselineLabel={all.baseline_label}
             totalRevenuePaise={all.total_revenue_paise}
             baselineRevenuePaise={all.baseline_revenue_paise}
-            aovUpliftPct={all.aov_uplift_pct}
-            orderCount={all.order_count}
-            ordersWithUpsell={all.orders_with_upsell}
+            baselineLabel={all.baseline_label}
           />
         )}
 
-        {funnelError ? (
-          <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-[13px] text-amber-800 shadow-sm">
-            {funnelError}
-          </div>
-        ) : (
-          <FunnelChart stages={funnel} />
-        )}
-
-        {/* Audit trail — full width, recent actions on top */}
-        <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-[0_8px_24px_-12px_rgba(15,23,42,0.2)]">
-          <div className="h-[440px]">
-            <AuditTrail merchantId={1} />
-          </div>
+        {/* Audit trail — 3 rows by default, expands on demand */}
+        <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+          <AuditTrail merchantId={1} />
         </div>
 
-        <div className="grid gap-4">
+        <div className="grid gap-3">
           {/* Orders table */}
-          <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-[0_8px_24px_-12px_rgba(15,23,42,0.2)]">
-            <div className="flex items-center gap-2.5 border-b border-slate-100 bg-white px-4 py-3">
+          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+            <div className="flex items-center gap-2.5 border-b border-slate-100 bg-white px-3 py-2.5">
               <span className="flex h-7 w-7 items-center justify-center rounded-md bg-slate-900" aria-hidden="true">
                 <TrendingUp className="h-3.5 w-3.5 text-white" />
               </span>
@@ -399,8 +324,8 @@ export default function MerchantPage() {
 
         </div>
 
-        <p className="text-xs text-slate-400" title={summary?.conversion_note}>
-          Conversion is approximate — paid orders over distinct AI sessions. Hover for method.
+        <p className="text-[11px] text-slate-400" title={summary?.conversion_note}>
+          Conversion = paid orders over tracked AI sessions.
         </p>
       </div>
     </div>

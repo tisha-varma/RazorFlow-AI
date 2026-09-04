@@ -28,6 +28,13 @@ class VerifyPaymentRequest(BaseModel):
     session_id: str
 
 
+class ReportFailureRequest(BaseModel):
+    razorpay_order_id: str
+    session_id: str
+    reason: str = "Payment failed at gateway"
+    razorpay_payment_id: str | None = None
+
+
 class VerifyPaymentResponse(BaseModel):
     status: str
     order_id: int

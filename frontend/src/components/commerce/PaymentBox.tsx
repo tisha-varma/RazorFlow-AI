@@ -189,8 +189,34 @@ export function PaymentBox({ approvalId, sessionId, onPaid }: PaymentBoxProps) {
           }
         },
       });
-      rzp.on("payment.failed", (resp: { error?: { description?: string } }) => {
-        setError(resp.error?.description || "Payment failed at the gateway. You can retry.");
+      rzp.on("payment.failed", (resp: {
+        error?: {
+          description?: string;
+          code?: string;
+          reason?: string;
+          metadata?: { payment_id?: string };
+        };
+      }) => {
+        // Tell the backend: this gateway event otherwise dies in the
+        // browser, leaving the order pending forever with no audit trace.
+        const reason =
+          resp.error?.description ||
+          resp.error?.reason ||
+          resp.error?.code ||
+          "Payment failed at the gateway";
+        fetch(`${API_BASE}/payment/report-failure`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            razorpay_order_id: order.razorpay_order_id,
+            session_id: sessionId,
+            reason,
+            razorpay_payment_id: resp.error?.metadata?.payment_id ?? null,
+          }),
+        }).catch(() => {
+          /* audit report is best-effort — the failed UI shows regardless */
+        });
+        setError(`${reason}. You can retry.`);
         setPhase("failed");
       });
       rzp.open();

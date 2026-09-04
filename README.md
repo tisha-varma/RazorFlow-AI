@@ -8,48 +8,106 @@
 
 **An AI buyer that safely transacts with a merchant — and grows merchant revenue.**
 
-> Built for the Razorpay AI Growth & Agentic Commerce hackathon track.
+Every money action is **explainable**, **bounded**, and **gated**. The AI never touches money directly: a deterministic policy engine and an explicit human approval gate stand between AI intent and every financial transaction — all on real Razorpay test-mode rails, all written to a tamper-evident audit trail.
 
-Every money action is **explainable**, **bounded**, and **gated**. The AI never directly controls money — a deterministic policy engine and an explicit human approval gate stand between AI intent and any financial transaction. Every step lands in a tamper-evident audit trail.
+🎬 **Watch the demo:** https://youtu.be/wim7gSKLrIA
 
-- **Buyer app** (`/buyer`): chat-driven shopping with cart, upsells, approval gate, and Razorpay test-mode checkout
-- **Merchant console** (`/merchant`): revenue dashboard, AI-impact comparison, commerce funnel, transaction audit
-- **Judge mode** (`/judge`): one-click Happy path, Policy blocked, Payment failed, and Merchant impact scenarios
+> 🏆 Built for the **Razorpay AI Growth & Agentic Commerce Hackathon** — a reference implementation for safely gating AI transactions. Every design choice (deterministic policy engine, hash-chained audit, single-use approval tokens) reflects real financial risk patterns.
 
 ## Contents
 
-- [Features](#features)
+- [See it in action](#see-it-in-action)
+- [Quick Start (2 min)](#quick-start-2-min)
+- [Core Capabilities](#core-capabilities)
+- [Safety Model](#safety-model)
 - [Installation](#installation)
-- [Usage & Quick Start](#usage--quick-start)
+- [Usage](#usage)
 - [API Documentation](#api-documentation)
 - [Configuration](#configuration)
 - [Examples](#examples)
-- [Safety Model](#safety-model)
 - [Architecture](#architecture)
 - [Project Structure](#project-structure)
 - [Testing](#testing)
 - [Demo Script](#demo-script)
+- [Troubleshooting](#troubleshooting)
+- [What's Next](#whats-next)
 - [Contributing](#contributing)
-- [Known Limitations](#known-limitations)
+- [Limitations](#limitations)
 - [License](#license)
 - [Acknowledgments](#acknowledgments)
 
-## Features
+## See it in action
 
-- 💬 **Conversational commerce** — SprintGroq-powered assistant (Groq `qwen/qwen3.6-27b`, 5-key rotation, Ollama fallback) with per-card "why this fits" reasoning, intent-aware loading stages, and clickable suggestion chips
-- 🛒 **Zero-LLM cart ops** — add/update/remove (by id *or name*), live totals + policy verdict on every mutation, in-cart filtering, newest-wins panels
-- 🛡️ **Policy engine** — max/min transaction, session spending limit, per-item quantity cap, upsell cap/flag, all enforced deterministically with a live limit bar and in-buyer editable settings (approval gate hard-locked on)
-- ✅ **Human approval gate** — itemized summary with upsell pairing reasons, limits + remaining budget, single-use tokens, stale-amount expiry, restart recovery; renders via 2.5s polling, never waiting on LLM latency
-- 💳 **Razorpay test mode** — server-created orders, checkout.js modal, server-side signature verification, signed webhooks (`captured`/`failed`), 30s status polling on ambiguous outcomes, same-approval retry with no double charge
-- 📊 **Merchant console** — revenue/AOV/conversion/upsell cards with demo-vs-live split, AOV-impact bars, cumulative funnel, orders table, full audit
-- 🔍 **Trust surfaces** — audit trail with What/Why/Amount/Actor/Policy·hash columns, live chain-intact badge, `GET /api/audit/verify`; protocol Trace strip (intent → tools → policy → approval → payment); frozen policy snapshots in every approval
-- 🧑‍⚖️ **Judge mode** — scripted, honestly-labeled scenario triggers plus "Reset demo" (perfect judge state) and "Simulate decline" (in-browser failure card + retry)
+**No test card needed.** `/judge` runs all four stories with one button each:
+
+- ✅ Happy path (successful purchase)
+- 🚫 Policy blocked (spending limit hit)
+- ❌ Payment failed & retry
+- 📈 Merchant revenue impact
+
+→ Load [http://localhost:3000/judge](http://localhost:3000/judge) after `npm run dev`.
+
+## Quick Start (2 min)
+
+```bash
+cd backend && python -m venv venv && venv/Scripts/activate && pip install -r requirements.txt
+cp .env.example .env  # Add your Groq + Razorpay keys
+python init_db.py && uvicorn backend.main:app --reload &
+cd ../frontend && npm install && npm run dev
+# Open http://localhost:3000 → "Start buying with AI" → try: "I need shoes under ₹5000"
+```
+
+Need detail? See [Installation](#installation).
+
+## Core Capabilities
+
+**Chat layer** → Groq-powered recommendations with per-card reasoning
+**Commerce layer** → Cart ops with zero LLM control
+**Safety layer** → Deterministic policy + human approval gate
+**Payment layer** → Razorpay test-mode checkout + verification + webhooks
+**Merchant layer** → Revenue, AOV lift, funnel, and audit console
+
+### Details
+
+- 💬 Conversational discovery (Groq `qwen/qwen3.6-27b`, 5-key rotation, Ollama fallback), intent-aware loading, clickable suggestions
+- 🛒 Add/update/remove by id *or name*, live totals + policy verdict on every mutation, automatic upsells with pairing reasons
+- 🛡️ Policy engine: max/min transaction, session limit, quantity and upsell caps — editable in-buyer, approval gate hard-locked on
+- ✅ Approval screen: itemized order, limits, remaining budget, single-use tokens, stale-amount expiry; renders via polling, never waits on LLM latency
+- 💳 Server-created Razorpay orders, checkout.js modal, server-side signature verification, signed webhooks, 30s status polling, same-approval retry with no double charge
+- 📊 Merchant console: revenue/AOV/conversion/upsell cards with demo-vs-live split, With-AI-vs-Without-AI diff, cumulative funnel, orders, full audit
+- 🔍 Trust surfaces: audit trail with What/Why/Amount/Actor/Hash columns, live chain-intact badge, protocol Trace strip, frozen policy snapshots
+- 🧑‍⚖️ Judge tooling: scripted scenarios, "Reset demo" (perfect judge state), "Simulate decline" (in-browser failure card + retry)
+
+| | Manual checkout | RazorFlow AI |
+|---|---|---|
+| User approves every purchase | ✅ | ✅ |
+| AI recommends, never auto-buys | ❌ | ✅ |
+| Spending limits | Manual | Deterministic |
+| Failure recovery | Dead end | Retry on same approval |
+| Audit trail | ❌ | ✅ Hash-chained, verifiable live |
+
+## Safety Model
+
+```
+AI  →  "I want to buy this"  →  POLICY ENGINE  →  Allowed?
+                                                      YES → User Approval → Razorpay API
+                                                      NO  → BLOCK + explain
+```
+
+The policy engine is the *only* path to payment. LLM recommendations → tools → policy verdict → approval gate → Razorpay. System-originated chat messages are answered from fixed text with zero LLM calls, so the agent can never hallucinate a paid order.
+
+- LLM never touches the database; never invents products, prices, or stock
+- All money is integer paise; all policy is deterministic backend code
+- Single-use approval tokens (replays 403); stale-amount + policy re-checks at approve *and* create-order time
+- Signatures verified against our own order records; webhooks signed with replay guard
+- Failed payments consume zero budget; hash-chained audit recomputed live
+- 120/min/IP rate limits on money routes; SQLite FK enforcement with startup orphan purge
 
 ## Installation
 
 ### Prerequisites
 
-- Python 3.12, Node.js 20+, Razorpay test-mode keys, Groq API key(s)
+Python 3.12, Node.js 20+, Razorpay test-mode keys, Groq API key(s).
 
 ### Backend
 
@@ -64,7 +122,7 @@ cd .. && backend\venv\Scripts\python.exe -m uvicorn backend.main:app --reload --
 # API: http://localhost:8000  ·  Docs: http://localhost:8000/docs
 ```
 
-> Run exactly **one** worker (the default). The state machine and hot caches are per-process; duplicate servers cause split-brain DB behavior.
+> Run exactly **one** worker (the default). State gating is per-process; duplicate servers cause split-brain behavior.
 
 ### Frontend
 
@@ -74,44 +132,40 @@ npm install
 npm run dev                    # http://localhost:3000
 ```
 
-### Exposing webhooks locally
+Buyer: `http://localhost:3000/buyer` · Merchant: `http://localhost:3000/merchant` · Judge: `http://localhost:3000/judge`
 
-Razorpay cannot reach `localhost`. Run a tunnel and register the exact URL in the Razorpay Dashboard (events: `payment.captured`, `payment.failed`):
+### Exposing webhooks locally
 
 ```bash
 cloudflared tunnel --url http://localhost:8000
 # Webhook URL: https://<tunnel-id>.trycloudflare.com/api/payment/webhook
 ```
 
-Mirror the dashboard's webhook secret into `.env` as `RAZORPAY_WEBHOOK_SECRET`.
+Register the exact URL in the Razorpay Dashboard (events: `payment.captured`, `payment.failed`) and mirror the webhook secret into `.env` as `RAZORPAY_WEBHOOK_SECRET`.
 
-## Usage & Quick Start
+## Usage
 
-1. Open `http://localhost:3000` → **Start buying with AI**.
-2. Chat: *"I need marathon shoes under ₹5,000"* → AI recommends RunPro Sprint (₹4,499) with reasoning.
-3. Accept the socks upsell (or add items directly — no LLM needed).
-4. The approval gate appears automatically → review itemized order, limits, remaining budget → **Approve Purchase**.
-5. **Pay securely with Razorpay** → test card `4100 2800 0000 1007` → order confirmed, cart empties, merchant dashboard updates.
-6. Decline path: test card `4100 2800 0006 0003` → crisp failed-payment card → **Retry payment** on the same approval.
-
-Prefer clicks over typing? `/judge` runs all four stories (happy, blocked, failed, impact) with one button each.
+1. **Buy:** `/buyer` → chat or click a suggestion → Add → accept upsell → *"yes, checkout"* → gate appears on its own → Approve → Pay (card `4100 2800 0000 1007`).
+2. **Break it:** decline card `4100 2800 0006 0003` (or **Simulate decline**) → failed card → **Retry payment** on the same approval.
+3. **Tune it:** **Policy settings** in the buyer header, or `/setup` for the full form.
+4. **Prove it:** `/merchant` for revenue + audit; **Trace** toggle for the turn's intent → tools → policy → approval → payment path.
 
 ## API Documentation
 
-| Area | Endpoints |
-|------|-----------|
-| Catalog | `GET /api/catalog/products`, `GET /api/catalog/products/{id}/related` |
-| Cart | `POST /api/cart`, `GET /api/cart/{id}`, `POST /api/cart/{id}/items`, `PUT …/items/{item}`, `DELETE …/items/{item}` |
-| Agent | `POST /api/agent/chat`, `POST /api/agent/session`, `GET /api/agent/session/{id}` |
-| Checkout | `GET /api/checkout/summary/{cart}`, `GET /api/checkout/approval/{id}/summary`, `POST /api/checkout/request-approval`, `POST /api/checkout/approve/{id}`, `POST /api/checkout/reject/{id}` |
-| Payment | `GET /api/payment/config`, `GET /api/payment/status/{rzrOrderId}`, `POST /api/payment/create-order/{approval}`, `POST /api/payment/verify`, `POST /api/payment/webhook` |
-| Policy | `GET /api/policy`, `GET /api/policy/session-usage`, `POST /api/policy`, `PUT /api/policy/{id}`, `POST /api/policy/check` |
-| Audit | `GET /api/audit?session_id=…`, `GET /api/audit/verify` |
-| Dashboard | `GET /api/dashboard/summary`, `GET /api/dashboard/funnel` |
-| Demo (`DEMO_MODE` only) | `POST /api/demo/reset`, `POST /api/demo/seed-history`, `POST /api/demo/run-successful-purchase`, `POST /api/demo/run-payment-failure`, `POST /api/demo/run-upsell-scenario`, `POST /api/demo/run-policy-block` |
-| Agent protocol | `GET /.well-known/ai-commerce.json` — machine-readable catalog, policy bounds, and purchase flow for external buyer agents |
+| Area | Key endpoints | Typical flow |
+|------|---------------|--------------|
+| Catalog | `GET /api/catalog/products`, `GET …/products/{id}/related` | Discover → recommend → upsell |
+| Cart | `POST /api/cart`, `POST /api/cart/{id}/items`, `PUT/DELETE …/items/{item}` | Build cart, totals + policy attached |
+| Agent | `POST /api/agent/chat`, `POST /api/agent/session` | Every chat turn |
+| Checkout | `GET /api/checkout/summary/{cart}`, `POST …/request-approval`, `POST …/approve/{id}` | Mint gate → human decides |
+| Payment | `POST /api/payment/create-order/{approval}`, `POST …/verify`, `POST …/webhook`, `GET …/status/{id}` | Order → pay → confirm → reconcile |
+| Policy | `GET /api/policy`, `GET /api/policy/session-usage`, `PUT /api/policy/{id}` | Limits in, verdicts out |
+| Audit | `GET /api/audit?session_id=…`, `GET /api/audit/verify` | Inspect → verify chain |
+| Dashboard | `GET /api/dashboard/summary`, `GET /api/dashboard/funnel` | Merchant proof |
+| Demo (`DEMO_MODE`) | `POST /api/demo/reset`, `…/seed-history`, `…/run-successful-purchase`, `…/run-payment-failure`, `…/run-policy-block` | One-click stories |
+| Agent protocol | `GET /.well-known/ai-commerce.json` | Machine-readable storefront for external buyer agents |
 
-Interactive docs with schemas: `http://localhost:8000/docs`.
+Full schemas: `http://localhost:8000/docs`.
 
 ## Configuration
 
@@ -120,9 +174,9 @@ Interactive docs with schemas: `http://localhost:8000/docs`.
 | `LLM_PROVIDER` | `groq` / `ollama` / `gemini` / `auto` | `groq` |
 | `LLM_API_KEY` / `LLM_API_KEYS` | Groq key + comma-separated rotation pool | empty |
 | `LLM_MODEL` | Chat model | `qwen/qwen3.6-27b` |
-| `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` | Test-mode API credentials | empty |
+| `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` | Test-mode credentials | empty |
 | `RAZORPAY_WEBHOOK_SECRET` | Webhook signature secret | empty |
-| `DEMO_MODE` | Show demo/judge tooling | `True` |
+| `DEMO_MODE` | Judge/demo tooling | `True` |
 | `DATABASE_URL` | SQLAlchemy URL (absolute path recommended) | `sqlite:///./razorflow.db` |
 | `NEXT_PUBLIC_API_URL` | Frontend → backend base URL | `http://localhost:8000/api` |
 
@@ -140,7 +194,7 @@ curl -X POST "http://localhost:8000/api/demo/run-policy-block?session_id=judge-p
 
 ```bash
 curl http://localhost:8000/api/audit/verify
-# {"ok":true,"break_at_id":null,"checked":58,"legacy_rows":1}
+# {"ok":true,"break_at_id":null,"checked":64,"legacy_rows":0}
 ```
 
 **Poll an ambiguous payment (what the UI does for 30s):**
@@ -149,27 +203,6 @@ curl http://localhost:8000/api/audit/verify
 curl "http://localhost:8000/api/payment/status/order_XXXX?session_id=YOUR_SESSION"
 # {"status":"paid","verified":true,...} | {"status":"pending",...} | {"status":"failed",...}
 ```
-
-## Safety Model
-
-```
-AI  →  "I want to buy this"  →  POLICY ENGINE  →  Allowed?
-                                                      YES → User Approval → Razorpay API
-                                                      NO  → BLOCK + explain
-```
-
-Deterministic backend code owns totals, policy checks, approvals, orders, and signature verification. The LLM only **recommends** and expresses cart intent through 9 tools — it cannot set prices, skip policy, auto-approve, or confirm payments. System-originated chat messages (approval/payment echoes) are answered from fixed text with zero LLM calls, so the agent can never hallucinate a paid order.
-
-### Safety Guarantees
-
-- LLM never directly accesses the database
-- LLM never invents product data, prices, or stock
-- All policy decisions are deterministic backend code; all money is integer paise
-- Approval requires explicit user action + single-use token (replays 403)
-- Stale-amount and policy re-checks at approve *and* create-order time
-- Payment signatures verified server-side against our own order records
-- Hash-chained audit log, verifiable live; failed payments consume zero budget
-- Rate limits (120/min/IP) on `/api/payment/*` and `/api/checkout/*`; SQLite FK enforcement with startup orphan purge
 
 ## Architecture
 
@@ -215,7 +248,7 @@ razorflow-ai/
     └── src/
         ├── app/           # Pages: landing, buyer, merchant, setup, judge
         ├── components/    # chat, commerce, audit, merchant, demo
-        └── lib/           # API client + shared types
+        └── lib/           # API client, shared types, IST time helpers
 ```
 
 ## Testing
@@ -226,42 +259,61 @@ $env:PYTHONPATH = "C:\projects\RazorFLow AI"   # Windows PowerShell
 .\venv\Scripts\python.exe -m pytest tests/ -q
 ```
 
-174 tests: agent, catalog, cart, payment, policy, dashboard, checkout, audit, demo. Payment tests use a mocked gateway; signature tests run real HMAC vectors; retry tests prove one approval → one paid order with no double charge; the chain test recomputes every audit hash. Frontend gates: `npm run lint` (0 errors, 0 warnings) and `npm run build` (offline-safe: no remote fonts, `next/image` unoptimized).
+174 tests: token replay rejection, stale-amount 409s, retry-without-double-charge, chain recomputation, idempotent seeding, quota-resilience fallbacks, mocked-gateway payments with real HMAC signature vectors. Frontend gates: `npm run lint` (0 errors, 0 warnings), `npm run build` (offline-safe: system fonts, unoptimized images).
 
 ## Demo Script
 
-The 2-minute version lives at `/judge` (one button per story). The manual version:
+The 2-minute version lives at `/judge`. Manual version:
 
 1. *"I need marathon shoes under ₹5,000"* → RunPro Sprint (₹4,499) with reasoning
-2. Accept the socks upsell (₹499) → policy-checked totals update live
-3. Approval gate appears on its own → review → **Approve Purchase**
-4. Razorpay test card `4100 2800 0000 1007` → confirmed, cart empties, dashboard moves
-5. Decline card `4100 2800 0006 0003` (or **Simulate decline**) → failed card → **Retry payment** on the same approval
-6. `/merchant` shows revenue, AOV lift, funnel, and the audit ledger with the chain-intact badge
+2. Accept the socks upsell (₹499) → totals + policy update live
+3. Gate appears on its own → review → **Approve Purchase**
+4. Card `4100 2800 0000 1007` → confirmed, cart empties, dashboard moves
+5. Card `4100 2800 0006 0003` (or **Simulate decline**) → failed card → **Retry payment**, same approval
+6. `/merchant`: revenue, With-vs-Without-AI diff, orders (amber demo chips vs emerald live ones), audit ledger with chain badge
+
+## Troubleshooting
+
+**Frontend: "API connection refused"**
+- Backend must be on 8000: `uvicorn backend.main:app --reload --port 8000`
+- `NEXT_PUBLIC_API_URL` must be `http://localhost:8000/api`
+
+**Groq "rate limit / quota exceeded"**
+- Add keys as `LLM_API_KEYS=key1,key2,key3` (auto-rotated); agent retries in-iteration and degrades to an honest message
+- Ollama fallback covers fully-offline chat
+
+**Razorpay webhook never fires**
+- Tunnel must be public: `cloudflared tunnel --url http://localhost:8000`
+- Exact tunnel URL registered under Razorpay Dashboard → Settings → Webhooks, secret mirrored to `RAZORPAY_WEBHOOK_SECRET`
+- Without webhooks, browser-reported declines still reconcile via `POST /payment/report-failure`
+
+**"DB is locked" on Windows**
+- Run exactly one worker (`--workers 1`, the default); SQLite serializes the rest
+
+## What's Next?
+
+- [ ] Multi-merchant onboarding + per-merchant API keys
+- [ ] Redis-backed session state + distributed rate limits
+- [ ] PostgreSQL + versioned migrations
+- [ ] Live Razorpay keys, refunds, settlements
+- [ ] OAuth for the merchant console
+
+Found a bug or want to contribute? See [Contributing](#contributing).
 
 ## Contributing
 
-Bug reports and pull requests are welcome via GitHub Issues/PRs:
+1. Fork the repo
+2. Create your branch (`git checkout -b feature/amazing-feature`)
+3. Cover backend changes with pytest; keep the frontend lint/build clean
+4. Commit (`git commit -m 'Add amazing feature'`) — never commit `.env`, `*.db`, or keys
+5. Push and open a Pull Request
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Keep backend changes covered by pytest and frontend changes lint-clean (`npm run lint`, `npm run build`)
-4. Commit (`git commit -m 'Add amazing feature'`) — never commit `.env`, `*.db`, or API keys
-5. Push (`git push origin feature/amazing-feature`) and open a Pull Request
+House rules: money stays integer paise; safety logic stays out of the LLM path; money/policy endpoints log audit events; scripted things say scripted.
 
-Coding standards: integer paise for all money, deterministic safety logic stays out of the LLM path, every new endpoint needs an audit event where money or policy is involved, UI copy stays honest (scripted things say scripted).
+## Limitations
 
-## Known Limitations
-
-- **Single hard-coded merchant (id 1).** Multi-merchant isolation, onboarding, and per-merchant keys are not implemented.
-- **In-memory session state.** The state machine gate and hot conversation cache live in process memory — run exactly **one** Uvicorn worker. Mitigations: chat history rehydrates from durable `AIInteraction` rows, and approval/payment gates recover from `Approval`/`Order` rows after a restart.
-- **SQLite + local file DB.** Fine for demo scale; schema evolves via startup `create_all` + compat migrator + orphan purge, not versioned migrations; no concurrency hardening.
-- **Groq free-tier quotas.** Rotating keys share ~200K tokens/day; exhaustion now retries in-iteration and degrades to an honest catalog-aware message.
-- **Razorpay test mode only.** Live keys, refunds, settlements, disputes are not wired. Local webhooks need a public tunnel.
-- **No auth.** Buyer sessions are unsecured localStorage IDs; the merchant console has no login.
-- **Synthetic methodology, labeled.** The "no-upsell baseline" is derived from our own paid orders minus upsell lines (no separate control group); conversion ≈ paid orders ÷ AI sessions; HIST-* demo history is split from live RF-* revenue, never blended.
-- **Rate limiting is per-process memory** (120/min/IP). Demo triggers synthesize the success capture (append-only `DEMO_SIMULATED_CAPTURE` event); the Razorpay order itself is real.
-- **Audit log is hash-chained, not immutable.** A DB admin can rewrite history — the chain then fails verification at the edited row, which is the point. `POST /api/demo/reset` is deliberately destructive.
+- **Demo-grade deployment surface.** Single merchant, single Uvicorn worker, SQLite file DB, localStorage sessions with no auth, and Razorpay test mode only — the safety *model* is production-shaped, the hosting is not (see [What's Next](#whats-next)).
+- **Small-scale metrics.** The With-vs-Without-AI baseline is derived from our own paid orders minus upsell lines (no separate control group), conversion ≈ paid orders ÷ tracked AI sessions, and seeded/scripted rows are labeled, never blended — honest at demo scale, not statistically powered.
 
 ## License
 
@@ -270,6 +322,5 @@ This project is licensed under the MIT License — see the [LICENSE](LICENSE) fi
 ## Acknowledgments
 
 - [Razorpay](https://razorpay.com) test mode + Python SDK for real gateway semantics without real money
-- [Groq](https://groq.com) free-tier LPU inference that makes the demo reproducible
-- [FastAPI](https://fastapi.tiangolo.com), [Next.js](https://nextjs.org), [shadcn/ui](https://ui.shadcn.com), [Tailwind CSS](https://tailwindcss.com), [Lucide](https://lucide.dev) for the stack
-- UAP (Universal Agentic Protocol) conventions behind `/.well-known/ai-commerce.json`
+- [Groq](https://groq.com) free-tier inference that makes the demo reproducible
+- [FastAPI](https://fastapi.tiangolo.com), [Next.js](https://nextjs.org), [shadcn/ui](https://ui.shadcn.com), [Tailwind CSS](https://tailwindcss.com), [Lucide](https://lucide.dev)

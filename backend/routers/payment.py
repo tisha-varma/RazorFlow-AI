@@ -15,6 +15,7 @@ from backend.schemas.payment import (
     CreateOrderRequest,
     CreateOrderResponse,
     PaymentStatusResponse,
+    ReportFailureRequest,
     VerifyPaymentRequest,
     VerifyPaymentResponse,
     WebhookResult,
@@ -405,6 +406,33 @@ def payment_status(razorpay_order_id: str, session_id: str, db: Session = Depend
         verified=payment.verified,
         razorpay_payment_id=payment.razorpay_payment_id,
     )
+
+
+@router.post("/report-failure")
+def report_failure(req: ReportFailureRequest, db: Session = Depends(get_db)):
+    """Gateway-reported failure from the browser checkout callback.
+
+    checkout.js fires `payment.failed` for declines/cancels, but that event
+    lives and dies in the browser — without this call the order sits
+    `pending` forever and the audit trail never learns the payment failed
+    (webhooks only cover this when a public tunnel is configured). Records
+    the gateway payment id when present, marks failed without fulfilling,
+    and never downgrades a paid order.
+    """
+    payment = (
+        db.query(RazorpayPayment)
+        .filter(RazorpayPayment.razorpay_order_id == req.razorpay_order_id)
+        .first()
+    )
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment order not found")
+    if payment.order.session_id != req.session_id:
+        raise HTTPException(status_code=403, detail="Session mismatch")
+    if req.razorpay_payment_id and not payment.razorpay_payment_id:
+        payment.razorpay_payment_id = req.razorpay_payment_id
+        db.commit()
+    _mark_order_failed(db, payment.order, payment, req.reason or "Payment failed at gateway")
+    return {"ok": True, "status": payment.order.status}
 
 
 @router.post("/webhook", response_model=WebhookResult)

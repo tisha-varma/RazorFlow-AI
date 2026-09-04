@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { formatTimeIST } from "@/lib/time";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -272,10 +273,8 @@ function labelFor(eventType: string): string {
 }
 
 function timeFor(timestamp?: string | null): string {
-  if (!timestamp) return "";
-  const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleTimeString("en-IN", { hour12: false });
+  // Stored timestamps are UTC-naive — render IST (see lib/time).
+  return formatTimeIST(timestamp);
 }
 
 export function AuditTrail({ sessionId, merchantId, refreshKey }: AuditTrailProps) {
@@ -283,6 +282,8 @@ export function AuditTrail({ sessionId, merchantId, refreshKey }: AuditTrailProp
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [chain, setChain] = useState<ChainStatus | null>(null);
+  const [showAll, setShowAll] = useState(false);
+  const visible = showAll ? events : events.slice(0, 3);
 
   const fetchChain = useCallback(async () => {
     try {
@@ -347,10 +348,10 @@ export function AuditTrail({ sessionId, merchantId, refreshKey }: AuditTrailProp
         {chain && (
           <Badge
             variant="outline"
-            className={`gap-1 rounded-full text-[11px] ${
+            className={`gap-1 rounded-full text-[11px] font-semibold ${
               chain.ok
                 ? "border-emerald-300 bg-emerald-50 text-emerald-700"
-                : "border-red-300 bg-red-50 text-red-700"
+                : "border-red-600 bg-red-600 text-white shadow-sm"
             }`}
             title={
               chain.ok
@@ -407,7 +408,7 @@ export function AuditTrail({ sessionId, merchantId, refreshKey }: AuditTrailProp
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {events.map((event) => {
+              {visible.map((event) => {
                 const detail = detailFor(event);
                 const why = whyFor(event);
                 const amount = amountFor(event);
@@ -415,7 +416,12 @@ export function AuditTrail({ sessionId, merchantId, refreshKey }: AuditTrailProp
                 const chip = EVENT_CHIP[event.event_type] ?? "bg-slate-200 text-slate-600";
                 const failed = FAILED_TYPES.has(event.event_type);
                 return (
-                  <tr key={event.id} className="align-top hover:bg-slate-50">
+                  <tr
+                    key={event.id}
+                    className={`align-top border-l-2 hover:bg-slate-50 ${
+                      failed ? "border-l-red-500" : "border-l-emerald-500"
+                    }`}
+                  >
                     <td className="px-3 py-2.5 text-center">
                       {failed ? (
                         <X className="inline h-4 w-4 text-red-500" aria-label="failed" />
@@ -450,14 +456,22 @@ export function AuditTrail({ sessionId, merchantId, refreshKey }: AuditTrailProp
                         {event.actor}
                       </span>
                     </td>
-                    <td className="px-3 py-2.5 font-mono text-[11px] text-slate-500 break-all">
-                      <span title={event.policy_snapshot_id ?? undefined}>
-                        {event.policy_snapshot_id
-                          ? `${event.policy_snapshot_id.slice(0, 12)}…`
-                          : <span className="text-slate-300">—</span>}
-                      </span>
+                    <td className="px-3 py-2.5 text-[11px] break-all">
+                      {event.policy_snapshot_id ? (
+                        <span
+                          className="inline-block rounded-md border border-slate-200 bg-slate-100 px-1.5 py-0.5 font-mono text-slate-600"
+                          title={event.policy_snapshot_id}
+                        >
+                          {event.policy_snapshot_id.slice(0, 12)}…
+                        </span>
+                      ) : (
+                        <span className="text-slate-300">—</span>
+                      )}
                       {event.event_hash && (
-                        <span className="mt-0.5 block text-slate-400" title={`prev_hash ${event.prev_hash ?? "—"}\nevent_hash ${event.event_hash}`}>
+                        <span
+                          className="mt-1 inline-block rounded-md border border-slate-200 bg-slate-100 px-1.5 py-0.5 font-mono text-slate-500"
+                          title={`prev_hash ${event.prev_hash ?? "—"}\nevent_hash ${event.event_hash}`}
+                        >
                           #{event.event_hash.slice(0, 8)}
                         </span>
                       )}
@@ -468,6 +482,16 @@ export function AuditTrail({ sessionId, merchantId, refreshKey }: AuditTrailProp
             </tbody>
           </table>
         </div>
+        {events.length > 3 && (
+          <button
+            type="button"
+            onClick={() => setShowAll((v) => !v)}
+            className="mt-2 w-full rounded-lg border border-slate-200 bg-white py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-50"
+            aria-expanded={showAll}
+          >
+            {showAll ? "Show less" : `View all ${events.length}`}
+          </button>
+        )}
       </div>
     </div>
   );

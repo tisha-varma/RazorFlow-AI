@@ -43,6 +43,38 @@ class TestDemoReset:
         assert policy.spending_limit_paise == 1000000
         assert policy.require_approval is True
 
+    def test_session_reset_preserves_completed_history(self, client, db_session, seed_data, monkeypatch):
+        """Buyer Reset demo must not wipe the merchant's revenue proof:
+        paid orders, decided approvals, and audit stay; only live state goes."""
+        from backend.models.cart import Cart
+        from backend.models.order import Order
+        from backend.models.approval import Approval
+        from backend.models.audit import AuditEvent
+
+        _mock_rzp_order(monkeypatch, "order_keep1")
+        run = client.post(
+            "/api/demo/run-successful-purchase", params={"session_id": "demo-keep"})
+        assert run.status_code == 200
+        audit_before = db_session.query(AuditEvent).filter(
+            AuditEvent.session_id == "demo-keep").count()
+        assert audit_before > 0
+
+        resp = client.post("/api/demo/reset", params={"session_id": "demo-keep"})
+        assert resp.status_code == 200
+
+        db_session.expire_all()
+        order = db_session.query(Order).filter(
+            Order.session_id == "demo-keep").one()
+        assert order.status == "paid"
+        assert db_session.query(Approval).filter(
+            Approval.session_id == "demo-keep").count() == 1
+        assert db_session.query(AuditEvent).filter(
+            AuditEvent.session_id == "demo-keep").count() == audit_before
+        # Paid order's cart is retired, never deleted (FK-safe, out of lookup).
+        assert db_session.query(Cart).filter(
+            Cart.session_id == "demo-keep",
+            Cart.status == "active").count() == 0
+
 
 class TestDemoTriggers:
     def test_successful_purchase_paid(self, client, db_session, seed_data, monkeypatch):
