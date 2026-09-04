@@ -15,7 +15,6 @@ Every money action is **explainable**, **bounded**, and **gated**. The AI never 
 
 ## Contents
 
-- [See it in action](#see-it-in-action)
 - [Quick Start (2 min)](#quick-start-2-min)
 - [Core Capabilities](#core-capabilities)
 - [Safety Model](#safety-model)
@@ -34,17 +33,6 @@ Every money action is **explainable**, **bounded**, and **gated**. The AI never 
 - [Limitations](#limitations)
 - [License](#license)
 - [Acknowledgments](#acknowledgments)
-
-## See it in action
-
-**No test card needed.** `/judge` runs all four stories with one button each:
-
-- ✅ Happy path (successful purchase)
-- 🚫 Policy blocked (spending limit hit)
-- ❌ Payment failed & retry
-- 📈 Merchant revenue impact
-
-→ Load [http://localhost:3000/judge](http://localhost:3000/judge) after `npm run dev`.
 
 ## Quick Start (2 min)
 
@@ -75,7 +63,7 @@ Need detail? See [Installation](#installation).
 - 💳 Server-created Razorpay orders, checkout.js modal, server-side signature verification, signed webhooks, 30s status polling, same-approval retry with no double charge
 - 📊 Merchant console: revenue/AOV/conversion/upsell cards with demo-vs-live split, With-AI-vs-Without-AI diff, cumulative funnel, orders, full audit
 - 🔍 Trust surfaces: audit trail with What/Why/Amount/Actor/Hash columns, live chain-intact badge, protocol Trace strip, frozen policy snapshots
-- 🧑‍⚖️ Judge tooling: scripted scenarios, "Reset demo" (perfect judge state), "Simulate decline" (in-browser failure card + retry)
+- 🧪 Demo tooling: "Reset demo" (fresh session + default limits, history preserved), "Simulate decline" (in-browser failure card + retry)
 
 | | Manual checkout | RazorFlow AI |
 |---|---|---|
@@ -131,7 +119,7 @@ npm install
 npm run dev                    # http://localhost:3000
 ```
 
-Buyer: `http://localhost:3000/buyer` · Merchant: `http://localhost:3000/merchant` · Judge: `http://localhost:3000/judge`
+Buyer: `http://localhost:3000/buyer` · Merchant: `http://localhost:3000/merchant`
 
 ### Exposing webhooks locally
 
@@ -175,7 +163,7 @@ Full schemas: `http://localhost:8000/docs`.
 | `LLM_MODEL` | Chat model | `qwen/qwen3.6-27b` |
 | `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` | Test-mode credentials | empty |
 | `RAZORPAY_WEBHOOK_SECRET` | Webhook signature secret | empty |
-| `DEMO_MODE` | Judge/demo tooling | `True` |
+| `DEMO_MODE` | Demo tooling (reset, scenario triggers) | `True` |
 | `DATABASE_URL` | SQLAlchemy URL (absolute path recommended) | `sqlite:///./razorflow.db` |
 | `NEXT_PUBLIC_API_URL` | Frontend → backend base URL | `http://localhost:8000/api` |
 
@@ -184,7 +172,7 @@ Full schemas: `http://localhost:8000/docs`.
 **Policy-blocked checkout (deterministic, no LLM):**
 
 ```bash
-curl -X POST "http://localhost:8000/api/demo/run-policy-block?session_id=judge-policy"
+curl -X POST "http://localhost:8000/api/demo/run-policy-block?session_id=demo-policy"
 # {"status":"blocked","cart_total_paise":899800,"allowed":false,
 #  "reason":"Cart total ₹8998.00 exceeds maximum transaction limit of ₹5000.00", ...}
 ```
@@ -245,7 +233,7 @@ razorflow-ai/
 └── frontend/              # Next.js 16 + React 19 + Tailwind + shadcn (37 files)
     ├── public/products/   # 15 product photos
     └── src/
-        ├── app/           # Pages: landing, buyer, merchant, setup, judge
+        ├── app/           # Pages: landing, buyer, merchant, setup
         ├── components/    # chat, commerce, audit, merchant, demo
         └── lib/           # API client, shared types, IST time helpers
 ```
@@ -262,7 +250,7 @@ $env:PYTHONPATH = "C:\projects\RazorFLow AI"   # Windows PowerShell
 
 ## Demo Script
 
-The 2-minute version lives at `/judge`. Manual version:
+The 2-minute version:
 
 1. *"I need marathon shoes under ₹5,000"* → RunPro Sprint (₹4,499) with reasoning
 2. Accept the socks upsell (₹499) → totals + policy update live

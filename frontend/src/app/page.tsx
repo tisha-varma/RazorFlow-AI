@@ -189,8 +189,6 @@ export default function Home() {
             <Link href="/buyer" className="hover:text-slate-900 transition-colors">AI Chat</Link>
             <span className="text-slate-300">|</span>
             <Link href="/merchant" className="hover:text-slate-900 transition-colors">Merchant Portal</Link>
-            <span className="text-slate-300">|</span>
-            <Link href="/judge" className="hover:text-slate-900 transition-colors">Judge Mode</Link>
           </div>
         </div>
       </footer>

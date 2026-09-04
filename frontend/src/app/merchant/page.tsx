@@ -116,9 +116,9 @@ export default function MerchantPage() {
   }, []);
 
   // NOTE: this page deliberately does NOT auto-seed. An empty dashboard is
-  // the honest fresh state — seed explicitly via POST /demo/seed-history,
-  // the buyer Reset-demo button, or /judge. (Auto-seed once fought a
-  // deliberate merchant-wide wipe by refilling HIST rows within seconds.)
+  // the honest fresh state — seed explicitly via POST /demo/seed-history.
+  // (Auto-seed once fought a deliberate merchant-wide wipe by refilling
+  // HIST rows within seconds.)
   const fetchDashboard = useCallback(async () => {
     try {
       await loadDashboard();

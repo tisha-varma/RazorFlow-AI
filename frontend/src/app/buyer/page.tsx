@@ -248,7 +248,7 @@ export default function BuyerPage() {
     };
   }, [sessionId, cart?.id, cartItemCount, approvalId, approvedId, handleApprovalNeeded]);
 
-  // Deterministic judge-state reset: clears this session's carts, orders,
+  // Deterministic demo reset: clears this session's carts, orders,
   // approvals, and trail rows and restores policy defaults (server-side) —
   // then mints a fresh session so budget, cart, and gate all start perfect.
   // Deliberately does NOT reseed demo history: after a wipe the dashboard

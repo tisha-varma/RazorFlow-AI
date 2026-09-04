@@ -150,7 +150,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
         setMessages((prev) => [...prev, assistantMessage]);
 
-        // Protocol trace for the judge strip: what the turn did, structurally.
+        // Protocol trace for the trace strip: what the turn did, structurally.
         onTraceFound?.({
           intent: message,
           tools: Array.isArray(data.tool_calls)
