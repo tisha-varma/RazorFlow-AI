@@ -63,37 +63,75 @@ every number proven?* RazorFlow AI is that proof.
 
 ## How It Works
 
-```
-                 ┌───────────────┐
-                 │   AI Agent    │
-                 │ Recommend     │
-                 │ Explain       │
-                 └───────┬───────┘
-                         │
-                         ▼
-                 ┌───────────────┐
-                 │     Cart      │
-                 └───────┬───────┘
-                         │
-                         ▼
-                 ┌───────────────┐
-                 │ Policy Engine │
-                 │ deterministic │
-                 └───────┬───────┘
-                         │
-                         ▼
-                 ┌───────────────┐
-                 │Human Approval │
-                 └───────┬───────┘
-                         │
-                         ▼
-                 ┌───────────────┐
-                 │   Razorpay    │
-                 └───────┬───────┘
-                         │
-              ┌──────────┴──────────┐
-              ▼                     ▼
-        Verification             Audit
+```text
+                    MERCHANT
+                       │
+                       ▼
+                Product Catalog
+                       │
+                       ▼
+             AI-Readable Catalog
+                       │
+                       ▼
+CUSTOMER ───────►  AI BUYER
+                       │
+                       ▼
+                Understand Intent
+                       │
+                       ▼
+                Search Catalog
+                       │
+                       ▼
+                Compare Products
+                       │
+                       ▼
+              Recommend Product
+                       │
+                       ▼
+                Add to Cart
+                       │
+                       ▼
+              Upsell / Cross-sell
+                       │
+                       ▼
+                 Final Cart
+                       │
+                       ▼
+                Calculate Total
+                       │
+                       ▼
+                POLICY ENGINE
+                 /          \
+               PASS          FAIL
+                │              │
+                ▼              ▼
+          Approval Gate      BLOCK
+                │
+                ▼
+        User Explicitly Approves
+                │
+                ▼
+          Razorpay Test Mode
+                │
+          ┌─────┴─────┐
+          │           │
+       SUCCESS      FAILURE
+          │           │
+          ▼           ▼
+   Verify Payment   Explain Failure
+          │           │
+          ▼           ▼
+     Order Confirm  Retry/Return
+          │
+          └─────┬─────┘
+                ▼
+           AUDIT TRAIL
+                │
+                ▼
+        MERCHANT DASHBOARD
+                │
+                ▼
+       Revenue / Upsell
 ```
 
 ## The Core Safety Model
