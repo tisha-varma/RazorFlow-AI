@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 
 interface SessionUsage {
   session_id: string;
@@ -26,31 +26,37 @@ function formatPaise(paise: number): string {
 export function SessionLimitBar({ sessionId, refreshKey }: SessionLimitBarProps) {
   const [usage, setUsage] = useState<SessionUsage | null>(null);
 
-  const fetchUsage = useCallback(async () => {
-    try {
-      const res = await fetch(`${API_BASE}/policy/session-usage?session_id=${sessionId}`);
-      if (!res.ok) return;
-      setUsage(await res.json());
-    } catch {
-      /* limit bar is advisory — never break the page */
-    }
-  }, [sessionId, refreshKey]);
-
   useEffect(() => {
-    fetchUsage();
-    const timer = setInterval(fetchUsage, 5000);
-    return () => clearInterval(timer);
-  }, [fetchUsage]);
+    let cancelled = false;
+    const fetchUsage = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/policy/session-usage?session_id=${sessionId}`);
+        if (!res.ok || cancelled) return;
+        setUsage(await res.json());
+      } catch {
+        /* limit bar is advisory — never break the page */
+      }
+    };
+    // Deferred so the effect body itself never synchronously reaches
+    // setState. refreshKey restarts the effect (and its interval) on change.
+    const immediate = setTimeout(() => {
+      void fetchUsage();
+    }, 0);
+    const timer = setInterval(() => {
+      void fetchUsage();
+    }, 5000);
+    return () => {
+      cancelled = true;
+      clearTimeout(immediate);
+      clearInterval(timer);
+    };
+  }, [sessionId, refreshKey]);
 
   if (!usage || usage.spending_limit_paise <= 0) return null;
 
   const pct = Math.min(100, (usage.used_paise / usage.spending_limit_paise) * 100);
   const barColor =
-    pct >= 90
-      ? "bg-gradient-to-r from-red-500 to-rose-400 shadow-[0_0_8px_rgba(239,68,68,0.6)]"
-      : pct >= 70
-        ? "bg-gradient-to-r from-amber-500 to-orange-400 shadow-[0_0_8px_rgba(245,158,11,0.5)]"
-        : "bg-gradient-to-r from-emerald-500 to-teal-400 shadow-[0_0_8px_rgba(16,185,129,0.5)]";
+    pct >= 90 ? "bg-red-500" : pct >= 70 ? "bg-amber-500" : "bg-emerald-500";
 
   return (
     <div

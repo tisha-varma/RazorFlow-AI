@@ -50,7 +50,8 @@ def get_purchase_summary(cart_id: int, session_id: str, db: Session = Depends(ge
         status=summary["status"],
         policy_allowed=summary["policy_allowed"],
         policy_reason=summary["policy_reason"],
-        policy_details=summary["policy_details"]
+        policy_details=summary["policy_details"],
+        approval_token=summary.get("approval_token"),
     )
 
 
@@ -83,7 +84,8 @@ def get_approval_summary(approval_id: int, session_id: str, db: Session = Depend
         status=summary["status"],
         policy_allowed=summary["policy_allowed"],
         policy_reason=summary["policy_reason"],
-        policy_details=summary["policy_details"]
+        policy_details=summary["policy_details"],
+        approval_token=summary.get("approval_token"),
     )
 
 

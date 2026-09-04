@@ -326,5 +326,8 @@ class CheckoutService:
             "status": approval.status if approval else "none",
             "policy_allowed": policy_result.allowed if policy_result else None,
             "policy_reason": policy_result.reason if policy_result else None,
-            "policy_details": policy_result.policy_details if policy_result else None
+            "policy_details": policy_result.policy_details if policy_result else None,
+            # Only live (unconsumed) tokens unlock the gate; a consumed/None
+            # token means "checkout again", never auto-show.
+            "approval_token": approval.approval_token if approval else None,
         }

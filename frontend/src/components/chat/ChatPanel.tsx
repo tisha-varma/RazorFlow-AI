@@ -17,12 +17,22 @@ interface Message {
   timestamp: Date;
 }
 
+export interface TurnTrace {
+  intent: string;
+  tools: { name: string }[];
+  state: string | null;
+  policyAllowed: boolean | null;
+  policyReason: string | null;
+  approvalId: number | null;
+}
+
 interface ChatPanelProps {
   sessionId: string;
   onProductsFound?: (products: Product[]) => void;
   onUpsellFound?: (products: Product[]) => void;
   onCartUpdate?: (cart: Cart) => void;
   onApprovalNeeded?: (approvalId: number, approvalToken?: string | null) => void;
+  onTraceFound?: (trace: TurnTrace) => void;
 }
 
 export interface ChatPanelHandle {
@@ -30,7 +40,7 @@ export interface ChatPanelHandle {
 }
 
 export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
-  ({ sessionId, onProductsFound, onUpsellFound, onCartUpdate, onApprovalNeeded }, ref) => {
+  ({ sessionId, onProductsFound, onUpsellFound, onCartUpdate, onApprovalNeeded, onTraceFound }, ref) => {
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState("");
     const [loading, setLoading] = useState(false);
@@ -140,6 +150,27 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
         setMessages((prev) => [...prev, assistantMessage]);
 
+        // Protocol trace for the judge strip: what the turn did, structurally.
+        onTraceFound?.({
+          intent: message,
+          tools: Array.isArray(data.tool_calls)
+            ? data.tool_calls.map((t: { tool_name?: string }) => ({
+                name: t.tool_name ?? "unknown",
+              }))
+            : [],
+          state: typeof data.state === "string" ? data.state : null,
+          policyAllowed:
+            typeof data.cart?.policy_allowed === "boolean"
+              ? data.cart.policy_allowed
+              : null,
+          policyReason:
+            typeof data.cart?.policy_reason === "string"
+              ? data.cart.policy_reason
+              : null,
+          approvalId:
+            typeof data.cart?.approval_id === "number" ? data.cart.approval_id : null,
+        });
+
         // Latest turn wins: the panel shows what the agent just talked
         // about, not everything ever mentioned. Empty turns keep the list.
         if (data.products && data.products.length > 0) {
@@ -161,7 +192,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         if (data.state === "AWAITING_APPROVAL" && data.cart?.approval_id) {
           onApprovalNeeded?.(data.cart.approval_id, data.cart.approval_token ?? null);
         }
-      } catch (error) {
+      } catch {
         stopActivityCycle();
         const errorMessage: Message = {
           id: crypto.randomUUID(),
@@ -174,7 +205,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         setLoading(false);
         loadingRef.current = false;
       }
-    }, [sessionId, onProductsFound, onUpsellFound, fetchCart, onApprovalNeeded, startActivityCycle, stopActivityCycle]);
+    }, [sessionId, onProductsFound, onUpsellFound, fetchCart, onApprovalNeeded, onTraceFound, startActivityCycle, stopActivityCycle]);
 
     useImperativeHandle(ref, () => ({
       sendMessage: sendToAgent,
@@ -196,7 +227,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     return (
       <div className="flex flex-col h-full bg-white/80 backdrop-blur-sm border-r border-slate-200/80">
         <div className="border-b border-slate-200/80 px-4 py-3 flex items-center gap-2.5 bg-white/90">
-          <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 shadow-[0_4px_12px_-2px_rgba(79,70,229,0.5)]" aria-hidden="true">
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-700" aria-hidden="true">
             <Sparkles className="h-4 w-4 text-white" />
           </span>
           <div className="leading-tight">
@@ -209,10 +240,10 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
           </Badge>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-[radial-gradient(ellipse_at_top,rgba(99,102,241,0.06),transparent_60%)]">
+        <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-stone-50">
           {messages.length === 0 && !loading && (
             <div className="flex flex-col items-center justify-center h-full text-center px-2">
-              <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 shadow-[0_8px_24px_-6px_rgba(79,70,229,0.5)] mb-4" aria-hidden="true">
+              <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-900 mb-4" aria-hidden="true">
                 <Sparkles className="h-6 w-6 text-white" />
               </span>
               <p className="text-[16px] font-semibold text-slate-800">What are you training for?</p>
@@ -268,7 +299,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
               disabled={loading || !input.trim()}
               size="icon"
               aria-label="Send message"
-              className="h-9 w-9 shrink-0 rounded-full bg-gradient-to-br from-indigo-600 to-violet-600 text-white shadow-md transition-transform hover:scale-105 active:scale-95 disabled:opacity-40 disabled:hover:scale-100 touch-manipulation"
+              className="h-9 w-9 shrink-0 rounded-full bg-blue-700 text-white transition-colors hover:bg-blue-600 active:scale-95 disabled:opacity-40 touch-manipulation"
             >
               <Send className="h-4 w-4" aria-hidden="true" />
             </Button>

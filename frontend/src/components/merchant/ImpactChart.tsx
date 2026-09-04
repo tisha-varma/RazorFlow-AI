@@ -40,7 +40,7 @@ function BarPair({
           </div>
           <div className="h-2.5 overflow-hidden rounded-full bg-slate-100">
             <div
-              className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-400 shadow-[0_0_8px_rgba(16,185,129,0.5)] transition-[width] duration-500"
+              className="h-full rounded-full bg-emerald-600 transition-[width] duration-500"
               style={{ width: `${(withValue / max) * 100}%` }}
             />
           </div>
@@ -77,7 +77,7 @@ export function ImpactChart({
   return (
     <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-[0_8px_24px_-12px_rgba(15,23,42,0.2)]">
       <div className="flex items-center gap-2">
-        <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 text-sm font-bold text-white shadow-sm" aria-hidden="true">
+        <span className="flex h-7 w-7 items-center justify-center rounded-md bg-emerald-600 text-sm font-bold text-white" aria-hidden="true">
           ₹
         </span>
         <h2 className="text-sm font-semibold text-slate-900">Revenue impact</h2>

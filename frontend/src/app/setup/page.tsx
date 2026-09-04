@@ -127,8 +127,8 @@ export default function SetupPolicy() {
       setTimeout(() => {
         router.push("/buyer");
       }, 1500);
-    } catch (err: any) {
-      setError(err.message || "Failed to submit policy configuration");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to submit policy configuration");
     } finally {
       setSaving(false);
     }
@@ -145,11 +145,6 @@ export default function SetupPolicy() {
 
   return (
     <div className="relative min-h-screen bg-stone-100 text-slate-900 py-12 px-6 flex flex-col justify-center items-center overflow-hidden">
-      <div className="pointer-events-none absolute inset-0" aria-hidden="true">
-        <div className="absolute -top-24 left-1/4 h-72 w-72 rounded-full bg-indigo-300/20 blur-[100px]" />
-        <div className="absolute bottom-0 right-1/4 h-72 w-72 rounded-full bg-emerald-300/20 blur-[100px]" />
-      </div>
-
       <div className="w-full max-w-xl relative z-10">
         <Button
           variant="ghost"
@@ -162,10 +157,10 @@ export default function SetupPolicy() {
 
         <form onSubmit={handleSubmit}>
           <Card className="bg-white border-slate-200/80 shadow-[0_16px_40px_-16px_rgba(15,23,42,0.25)] overflow-hidden">
-            <div className="h-1 bg-gradient-to-r from-indigo-500 via-violet-500 to-emerald-500" aria-hidden="true" />
+            <div className="h-1 bg-slate-900" aria-hidden="true" />
             <CardHeader className="border-b border-slate-100 pb-6">
               <div className="flex justify-between items-center">
-                <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-[0_4px_12px_-2px_rgba(79,70,229,0.5)]">
+                <div className="h-10 w-10 rounded-lg bg-slate-900 flex items-center justify-center">
                   <ShieldCheck className="h-5 w-5 text-white" />
                 </div>
                 <Badge variant="outline" className="rounded-full border-emerald-300 text-emerald-700 bg-emerald-50 text-xs">
@@ -326,7 +321,7 @@ export default function SetupPolicy() {
               <Button
                 type="submit"
                 disabled={saving}
-                className="rounded-full bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-semibold shadow-md"
+                className="rounded-full bg-blue-700 hover:bg-blue-600 text-white font-semibold"
               >
                 <Save className="mr-2 h-4 w-4" />
                 {saving ? "Saving Configuration..." : "Save Policy Config"}

@@ -17,9 +17,9 @@ export function UpsellOffer({ products, onAddToCart }: UpsellOfferProps) {
   }
 
   return (
-    <div className="rounded-2xl border border-amber-200/80 bg-gradient-to-br from-amber-50 to-orange-50/60 shadow-[0_8px_24px_-12px_rgba(217,119,6,0.35)] overflow-hidden">
+    <div className="rounded-xl border border-amber-200/80 bg-amber-50 overflow-hidden">
       <div className="px-4 py-3 border-b border-amber-200/70 flex items-center gap-2">
-        <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-gradient-to-br from-amber-500 to-orange-500 shadow-sm" aria-hidden="true">
+        <span className="flex h-6 w-6 items-center justify-center rounded-md bg-amber-600" aria-hidden="true">
           <Sparkles className="h-3.5 w-3.5 text-white" />
         </span>
         <span className="text-sm font-semibold text-amber-900">

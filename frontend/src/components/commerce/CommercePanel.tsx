@@ -54,7 +54,7 @@ export function CommercePanel({
     <div className="flex flex-col h-full bg-transparent">
       {/* Header */}
       <div className="bg-white/90 backdrop-blur-sm border-b border-slate-200/80 px-4 py-3 flex items-center gap-2.5 shrink-0">
-        <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 shadow-[0_4px_12px_-2px_rgba(79,70,229,0.5)]" aria-hidden="true">
+        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-700" aria-hidden="true">
           <ShoppingBag className="h-4 w-4 text-white" />
         </span>
         <div className="leading-tight">
@@ -130,10 +130,8 @@ export function CommercePanel({
 
           {products.length === 0 && itemCount === 0 && (
             <div className="flex flex-col items-center justify-center py-12 text-center" aria-live="polite">
-              <span className="relative mb-4 flex h-16 w-16 items-center justify-center" aria-hidden="true">
-                <span className="absolute inset-0 rounded-2xl bg-gradient-to-br from-indigo-100 to-violet-100" />
-                <span className="absolute inset-0 rounded-2xl bg-gradient-to-br from-indigo-500/10 to-violet-500/10 blur-md" />
-                <Package className="relative h-7 w-7 text-indigo-500" />
+              <span className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-50 border border-blue-100" aria-hidden="true">
+                <Package className="h-7 w-7 text-blue-600" />
               </span>
               <p className="text-[15px] font-semibold text-slate-800">Your shelf is empty</p>
               <p className="mt-1 max-w-[250px] text-[13px] leading-relaxed text-slate-500">

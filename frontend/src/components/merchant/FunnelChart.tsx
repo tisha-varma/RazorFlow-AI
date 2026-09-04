@@ -23,7 +23,7 @@ export function FunnelChart({ stages }: { stages: FunnelStage[] }) {
   return (
     <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-[0_8px_24px_-12px_rgba(15,23,42,0.2)]">
       <div className="flex items-center gap-2">
-        <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 shadow-sm" aria-hidden="true">
+        <span className="flex h-7 w-7 items-center justify-center rounded-md bg-blue-700" aria-hidden="true">
           <Filter className="h-3.5 w-3.5 text-white" />
         </span>
         <h2 className="text-sm font-semibold text-slate-900">AI commerce funnel</h2>
@@ -51,10 +51,8 @@ export function FunnelChart({ stages }: { stages: FunnelStage[] }) {
                 </span>
                 <div className="h-7 flex-1 overflow-hidden rounded-lg bg-slate-100">
                   <div
-                    className={`flex h-full items-center justify-end rounded-lg pr-2 text-[11px] font-bold tabular-nums text-white shadow-sm transition-[width] duration-700 ${
-                      i === stages.length - 1
-                        ? "bg-gradient-to-r from-emerald-500 to-teal-400"
-                        : "bg-gradient-to-r from-indigo-500 to-violet-400"
+                    className={`flex h-full items-center justify-end rounded-lg pr-2 text-[11px] font-bold tabular-nums text-white transition-[width] duration-700 ${
+                      i === stages.length - 1 ? "bg-emerald-600" : "bg-blue-600"
                     }`}
                     style={{ width: `${Math.max(s.sessions > 0 ? 10 : 0, (s.sessions / max) * 100)}%` }}
                   >

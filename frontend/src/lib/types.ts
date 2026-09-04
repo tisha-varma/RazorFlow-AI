@@ -128,7 +128,7 @@ export interface Approval {
   cart_id: number;
   requested_amount_paise: number;
   status: "pending" | "approved" | "rejected" | "expired";
-  summary_json: any;
+  summary_json: Record<string, unknown>;
   approved_at?: string;
   created_at: string;
   cart?: Cart;
@@ -139,7 +139,7 @@ export interface AuditEvent {
   session_id?: string;
   merchant_id: number;
   event_type: string;
-  event_data: any;
+  event_data: Record<string, unknown>;
   actor: "user" | "ai" | "system";
   timestamp: string;
   related_entity_type?: string;

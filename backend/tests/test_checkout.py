@@ -66,6 +66,40 @@ class TestCheckoutSummary:
         assert len(data["items"]) == 2
         assert data["policy_details"]["remaining_budget"] == 500200
 
+    def test_summary_carries_live_token_for_gate_poll(self, client, seed_data):
+        """M4: the buyer polls summary/{cart} so the gate renders without
+        waiting on LLM latency. Pending approval => token present; after the
+        token is consumed (approved) => token absent, gate must not show."""
+        from backend.services.state_machine import state_machine, SessionState
+        # Dedicated session: approving here moves the global state machine,
+        # which must not leak into the other sum-sess tests.
+        p1 = seed_data["p1"]
+        cart = client.post("/api/cart", json={"session_id": "gate-sess", "merchant_id": 1}).json()
+        client.post(f"/api/cart/{cart['id']}/items", json={"product_id": p1.id, "quantity": 1})
+        state_machine.set_state("gate-sess", SessionState.DISCOVERING)
+        state_machine.set_state("gate-sess", SessionState.CART_BUILDING)
+        state_machine.set_state("gate-sess", SessionState.POLICY_CHECK)
+        appr = client.post(
+            "/api/checkout/request-approval",
+            json={"cart_id": cart["id"], "session_id": "gate-sess"}
+        ).json()
+
+        live = client.get(
+            f"/api/checkout/summary/{cart['id']}", params={"session_id": "gate-sess"}
+        ).json()
+        assert live["status"] == "pending"
+        assert live["approval_id"] == appr["id"]
+        assert live["approval_token"] == appr["approval_token"]
+
+        client.post(
+            f"/api/checkout/approve/{appr['id']}",
+            json={"session_id": "gate-sess", "approval_token": appr["approval_token"]}
+        )
+        spent = client.get(
+            f"/api/checkout/summary/{cart['id']}", params={"session_id": "gate-sess"}
+        ).json()
+        assert spent["approval_token"] is None
+
     def test_approval_summary_session_mismatch(self, client, seed_data):
         cart = self._cart_with_upsell(client, seed_data)
         from backend.services.state_machine import state_machine, SessionState

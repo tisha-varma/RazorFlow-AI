@@ -15,7 +15,7 @@ export async function fetchJson(endpoint: string, options?: RequestInit) {
     try {
       const errorData = await response.json();
       errorMsg = errorData.detail || errorMsg;
-    } catch (_) {}
+    } catch {}
     throw new Error(errorMsg);
   }
 

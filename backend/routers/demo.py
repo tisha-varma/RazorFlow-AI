@@ -97,10 +97,12 @@ def reset_demo(session_id: str | None = None, db: Session = Depends(get_db)):
         approval_q = approval_q.filter(False)
     counts["approvals"] = approval_q.delete(synchronize_session=False)
 
-    counts["carts"] = db.query(Cart).filter(
-        Cart.id.in_(cart_ids)).delete(synchronize_session=False) if cart_ids else 0
+    # FK order matters now that foreign_keys=ON is enforced: orders (and
+    # approvals above) reference carts, so carts go last.
     counts["orders"] = db.query(Order).filter(
         Order.id.in_(order_ids)).delete(synchronize_session=False) if order_ids else 0
+    counts["carts"] = db.query(Cart).filter(
+        Cart.id.in_(cart_ids)).delete(synchronize_session=False) if cart_ids else 0
 
     counts["audit_events"] = _scope_event(db.query(AuditEvent), AuditEvent).delete(
         synchronize_session=False)
@@ -298,6 +300,50 @@ def _drive_flow(db: Session, session_id: str, fail_payment: bool = False) -> dic
         "razorpay_order_id": rzr_order_id, "razorpay_payment_id": pay_id,
         "total_paise": totals["total_paise"], "simulated_capture": True,
         "duration_ms": int((time.time() - started) * 1000), "steps": log
+    }
+
+
+@router.post("/run-policy-block")
+def run_policy_block(session_id: str = "demo-policy-block", db: Session = Depends(get_db)):
+    """Deterministic policy-block demo: build a cart that violates the max
+    transaction limit and return the engine's verdict. No approval is
+    created — the gate refuses before any artifact exists."""
+    _require_demo()
+    from backend.services.catalog_service import CatalogService
+    from backend.services.cart_service import CartService
+    from backend.services.policy_engine import PolicyEngine
+    from backend.models.policy import CommercePolicy
+
+    found, _ = CatalogService.get_products(db, query=DEMO_PRODUCT, limit=5)
+    if not found:
+        raise HTTPException(status_code=500, detail=f"Demo product '{DEMO_PRODUCT}' missing")
+    main = next((p for p in found if p.name == DEMO_PRODUCT), found[0])
+
+    cart = CartService.create_cart(db, session_id, 1)
+    CartService.add_item(db, cart.id, main.id, quantity=2)
+    totals = CartService.calculate_totals(db, cart.id)
+
+    policy = db.query(CommercePolicy).filter(CommercePolicy.is_active == True).first()
+    if not policy:
+        raise HTTPException(status_code=500, detail="No active policy")
+    verdict = PolicyEngine.check_purchase_policy(db, cart.id, session_id, policy)
+
+    return {
+        "status": "blocked" if not verdict.allowed else "allowed",
+        "session_id": session_id,
+        "cart_id": cart.id,
+        "product": main.name,
+        "quantity": 2,
+        "cart_total_paise": totals["total_paise"],
+        "allowed": verdict.allowed,
+        "reason": verdict.reason,
+        "policy_details": verdict.policy_details,
+        "steps": [
+            f"cart: 2 x {main.name} = Rs {totals['total_paise'] / 100:,.0f}",
+            f"policy: max transaction Rs {policy.max_transaction_amount_paise / 100:,.0f}",
+            f"verdict: {'BLOCKED' if not verdict.allowed else 'allowed'} — {verdict.reason}",
+            "no approval created: the gate refuses before any artifact exists",
+        ],
     }
 
 

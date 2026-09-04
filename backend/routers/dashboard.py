@@ -33,6 +33,11 @@ def _period_stats(db: Session, merchant_id: int, since=None) -> dict:
     total_revenue = sum(o.total_paise for o in orders)
     count = len(orders)
     ai_count = sum(1 for o in orders if o.is_ai_assisted)
+    # Honest labeling: HIST-* rows are deterministic demo history, RF-*/live
+    # rows are real test-mode purchases. Judges see the split, not a blend.
+    demo_orders = [o for o in orders if (o.order_number or "").startswith("HIST-")]
+    demo_order_count = len(demo_orders)
+    demo_revenue = sum(o.total_paise for o in demo_orders)
 
     # Baseline: the same real orders with their upsell portion removed.
     # This is derived from actual order data - not a separate control group
@@ -52,6 +57,10 @@ def _period_stats(db: Session, merchant_id: int, since=None) -> dict:
         "total_revenue_paise": total_revenue,
         "order_count": count,
         "ai_assisted_orders": ai_count,
+        "demo_order_count": demo_order_count,
+        "demo_revenue_paise": demo_revenue,
+        "live_order_count": count - demo_order_count,
+        "live_revenue_paise": total_revenue - demo_revenue,
         "upsell_revenue_paise": int(upsell_revenue),
         "upsell_pct": round(upsell_revenue / total_revenue * 100, 1) if total_revenue else 0.0,
         "avg_order_value_paise": aov,

@@ -28,7 +28,7 @@ export function CartSummary({ cart, onUpdateQuantity, onRemoveItem, onCheckout }
     return (
       <div className="rounded-2xl border border-dashed border-slate-300 bg-white/60 p-6">
         <div className="flex flex-col items-center text-center">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-slate-100 to-slate-200 flex items-center justify-center mb-3">
+          <div className="w-12 h-12 rounded-xl bg-slate-100 flex items-center justify-center mb-3">
             <ShoppingBag className="h-5 w-5 text-slate-400" aria-hidden="true" />
           </div>
           <p className="text-[15px] text-slate-700 font-semibold">Your cart is empty</p>
@@ -41,9 +41,9 @@ export function CartSummary({ cart, onUpdateQuantity, onRemoveItem, onCheckout }
   return (
     <div className="rounded-2xl border border-slate-200/80 bg-white shadow-[0_8px_24px_-12px_rgba(15,23,42,0.25)] overflow-hidden">
       {/* Header */}
-      <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-white to-indigo-50/50">
+      <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between bg-white">
         <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-sm">
+          <div className="w-7 h-7 rounded-lg bg-blue-700 flex items-center justify-center">
             <ShoppingBag className="h-3.5 w-3.5 text-white" aria-hidden="true" />
           </div>
           <span className="text-[15px] font-semibold text-slate-900">Cart</span>
@@ -146,7 +146,7 @@ export function CartSummary({ cart, onUpdateQuantity, onRemoveItem, onCheckout }
       </div>
 
       {/* Summary — the money moment */}
-      <div className="px-4 py-4 border-t border-emerald-100 bg-gradient-to-br from-emerald-50 via-emerald-50/60 to-teal-50/60">
+      <div className="px-4 py-4 border-t border-emerald-200 bg-emerald-50">
         {upsellPaise > 0 && (
           <div className="flex justify-between text-[13px] text-slate-600 mb-1">
             <span>Upsell items</span>
@@ -163,7 +163,7 @@ export function CartSummary({ cart, onUpdateQuantity, onRemoveItem, onCheckout }
           <>
             <Button
               onClick={onCheckout}
-              className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-[15px] font-semibold mt-3 h-11 shadow-[0_6px_16px_-4px_rgba(5,150,105,0.5)] transition-all active:scale-[0.99]"
+              className="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-[15px] font-semibold mt-3 h-11 transition-all active:scale-[0.99]"
             >
               Proceed to Checkout
             </Button>

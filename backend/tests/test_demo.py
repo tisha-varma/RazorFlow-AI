@@ -109,6 +109,33 @@ class TestDemoGate:
         assert client.post("/api/demo/run-successful-purchase").status_code == 403
 
 
+class TestPolicyBlockDemo:
+    def test_over_limit_cart_blocked_without_approval(self, client, seed_data):
+        from backend.models.approval import Approval
+        from backend.database import get_db
+
+        resp = client.post("/api/demo/run-policy-block", params={"session_id": "demo-pol"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "blocked"
+        assert body["allowed"] is False
+        assert body["cart_total_paise"] == 2 * 449900
+        assert len(body["steps"]) >= 3
+
+        # The gate refuses before any artifact: no approval was minted.
+        db = next(get_db())
+        try:
+            assert db.query(Approval).filter(
+                Approval.session_id == "demo-pol").count() == 0
+        finally:
+            db.close()
+
+    def test_policy_block_gated(self, client, monkeypatch):
+        from backend.config import settings
+        monkeypatch.setattr(settings, "DEMO_MODE", False)
+        assert client.post("/api/demo/run-policy-block").status_code == 403
+
+
 class TestSeedHistory:
     def test_seed_history_idempotent(self, client):
         from backend.models.order import Order

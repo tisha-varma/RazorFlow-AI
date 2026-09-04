@@ -16,12 +16,17 @@ import {
   Percent,
   Store,
   History,
+  RefreshCw,
 } from "lucide-react";
 
 interface PeriodStats {
   total_revenue_paise: number;
   order_count: number;
   ai_assisted_orders: number;
+  demo_order_count: number;
+  demo_revenue_paise: number;
+  live_order_count: number;
+  live_revenue_paise: number;
   upsell_revenue_paise: number;
   upsell_pct: number;
   avg_order_value_paise: number;
@@ -95,15 +100,15 @@ function StatCard({
   bar: string;
 }) {
   return (
-    <div className="group relative overflow-hidden rounded-2xl border border-slate-200/80 bg-white p-4 shadow-[0_8px_24px_-12px_rgba(15,23,42,0.25)] transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_16px_32px_-12px_rgba(15,23,42,0.3)]">
-      <div className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${bar}`} aria-hidden="true" />
+    <div className="group relative overflow-hidden rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md">
+      <div className={`absolute inset-x-0 top-0 h-1 ${bar}`} aria-hidden="true" />
       <div className="flex items-center gap-2.5">
-        <span className={`flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br ${tile} text-white shadow-md`}>
+        <span className={`flex h-9 w-9 items-center justify-center rounded-lg ${tile} text-white`}>
           <Icon className="h-4 w-4" aria-hidden="true" />
         </span>
         <span className="text-[13px] font-medium text-slate-500">{label}</span>
       </div>
-      <p className="mt-2.5 bg-gradient-to-br from-slate-900 to-slate-700 bg-clip-text text-[26px] font-extrabold tabular-nums leading-none text-transparent">{value}</p>
+      <p className="mt-2.5 text-[26px] font-extrabold tabular-nums leading-none text-slate-900">{value}</p>
       {sub && <p className="mt-1.5 text-xs tabular-nums text-slate-500">{sub}</p>}
     </div>
   );
@@ -113,10 +118,13 @@ export default function MerchantPage() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [funnel, setFunnel] = useState<FunnelStage[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [funnelError, setFunnelError] = useState<string | null>(null);
   const [seeding, setSeeding] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const seededOnce = useRef(false);
 
   const loadDashboard = useCallback(async () => {
+    // Panels fail independently: a funnel outage must never blank revenue.
     const [summaryRes, funnelRes] = await Promise.all([
       fetch(`${API_BASE}/dashboard/summary?merchant_id=1`),
       fetch(`${API_BASE}/dashboard/funnel?merchant_id=1`),
@@ -126,6 +134,9 @@ export default function MerchantPage() {
     setSummary(data);
     if (funnelRes.ok) {
       setFunnel((await funnelRes.json()).stages ?? []);
+      setFunnelError(null);
+    } else {
+      setFunnelError("Funnel unavailable — revenue above is unaffected.");
     }
     return data;
   }, []);
@@ -159,25 +170,27 @@ export default function MerchantPage() {
   }, [loadDashboard]);
 
   useEffect(() => {
-    fetchDashboard();
-    const timer = setInterval(fetchDashboard, 5000);
-    return () => clearInterval(timer);
+    // Deferred so the effect body itself never synchronously reaches
+    // setState: timer/subscription callbacks are the allowed context.
+    const immediate = setTimeout(() => {
+      void fetchDashboard();
+    }, 0);
+    const timer = setInterval(() => {
+      void fetchDashboard();
+    }, 5000);
+    return () => {
+      clearTimeout(immediate);
+      clearInterval(timer);
+    };
   }, [fetchDashboard]);
 
   const all = summary?.all_time;
-  const today = summary?.today;
   const hasDemoData = (summary?.recent_orders ?? []).some((o) =>
     o.order_number.startsWith("HIST-")
   );
 
   return (
     <div className="relative min-h-screen text-slate-900 flex flex-col bg-stone-100">
-      {/* Ambient mesh backdrop */}
-      <div className="pointer-events-none absolute inset-0" aria-hidden="true">
-        <div className="absolute -top-32 right-1/4 h-72 w-72 rounded-full bg-emerald-300/20 blur-[100px]" />
-        <div className="absolute bottom-0 left-1/4 h-72 w-72 rounded-full bg-indigo-300/20 blur-[100px]" />
-      </div>
-
       <header className="relative border-b border-slate-200/80 bg-white/85 backdrop-blur-md px-4 py-3 flex items-center gap-4 z-50 shadow-[0_1px_12px_rgba(15,23,42,0.06)]">
         <Link href="/">
           <Button variant="ghost" size="sm" className="rounded-full text-slate-500 hover:text-slate-900 hover:bg-slate-100">
@@ -186,7 +199,7 @@ export default function MerchantPage() {
           </Button>
         </Link>
         <div className="flex items-center gap-2.5">
-          <div className="h-8 w-8 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-[0_4px_12px_-2px_rgba(5,150,105,0.5)]" aria-hidden="true">
+          <div className="h-8 w-8 rounded-lg bg-slate-900 flex items-center justify-center" aria-hidden="true">
             <Store className="h-4 w-4 text-white" />
           </div>
           <div className="leading-tight">
@@ -195,6 +208,26 @@ export default function MerchantPage() {
           </div>
         </div>
         <div className="ml-auto flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={async () => {
+              setRefreshing(true);
+              setError(null);
+              try {
+                await loadDashboard();
+              } catch (e) {
+                setError(e instanceof Error ? e.message : "Could not load dashboard");
+              } finally {
+                setRefreshing(false);
+              }
+            }}
+            title="Reload dashboard now"
+            className="rounded-full text-slate-500 hover:text-slate-900 hover:bg-slate-100"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 mr-1 ${refreshing ? "animate-spin" : ""}`} aria-hidden="true" />
+            Refresh
+          </Button>
           {hasDemoData && (
             <Badge variant="outline" className="gap-1 rounded-full border-amber-300 bg-amber-50 text-[11px] text-amber-800" title="HIST-* rows are deterministic demo history; live orders appear as RF-*">
               <History className="h-3 w-3" aria-hidden="true" />
@@ -226,33 +259,37 @@ export default function MerchantPage() {
             icon={Banknote}
             label="Total revenue"
             value={all ? formatPaise(all.total_revenue_paise) : "—"}
-            sub={today ? `Today ${formatPaise(today.total_revenue_paise)}` : undefined}
-            tile="from-emerald-500 to-teal-600"
-            bar="from-emerald-500 to-teal-400"
+            sub={
+              all
+                ? `Live ${formatPaise(all.live_revenue_paise)} (${all.live_order_count}) · demo ${formatPaise(all.demo_revenue_paise)} (${all.demo_order_count})`
+                : undefined
+            }
+            tile="bg-emerald-600"
+            bar="bg-emerald-500"
           />
           <StatCard
             icon={Receipt}
             label="Avg order value"
             value={all ? formatPaise(all.avg_order_value_paise) : "—"}
             sub={all ? `${all.order_count} paid orders · ${all.ai_assisted_orders} AI-assisted` : undefined}
-            tile="from-indigo-500 to-violet-600"
-            bar="from-indigo-500 to-violet-400"
+            tile="bg-blue-700"
+            bar="bg-blue-600"
           />
           <StatCard
             icon={Percent}
             label="AI conversion"
             value={summary ? `${summary.conversion_rate_pct}%` : "—"}
             sub={summary ? `${summary.conversion_sessions} AI sessions (approx)` : undefined}
-            tile="from-sky-500 to-cyan-500"
-            bar="from-sky-500 to-cyan-400"
+            tile="bg-sky-600"
+            bar="bg-sky-500"
           />
           <StatCard
             icon={Gift}
             label="Upsell revenue"
             value={all ? formatPaise(all.upsell_revenue_paise) : "—"}
             sub={all ? `${all.upsell_pct}% of revenue` : undefined}
-            tile="from-amber-500 to-orange-500"
-            bar="from-amber-500 to-orange-400"
+            tile="bg-amber-600"
+            bar="bg-amber-500"
           />
         </div>
 
@@ -269,7 +306,13 @@ export default function MerchantPage() {
           />
         )}
 
-        <FunnelChart stages={funnel} />
+        {funnelError ? (
+          <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-[13px] text-amber-800 shadow-sm">
+            {funnelError}
+          </div>
+        ) : (
+          <FunnelChart stages={funnel} />
+        )}
 
         {/* Audit trail — full width, recent actions on top */}
         <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-[0_8px_24px_-12px_rgba(15,23,42,0.2)]">
@@ -281,8 +324,8 @@ export default function MerchantPage() {
         <div className="grid gap-4">
           {/* Orders table */}
           <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-[0_8px_24px_-12px_rgba(15,23,42,0.2)]">
-            <div className="flex items-center gap-2.5 border-b border-slate-100 bg-gradient-to-r from-white to-slate-50 px-4 py-3">
-              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-slate-600 to-slate-800 shadow-sm" aria-hidden="true">
+            <div className="flex items-center gap-2.5 border-b border-slate-100 bg-white px-4 py-3">
+              <span className="flex h-7 w-7 items-center justify-center rounded-md bg-slate-900" aria-hidden="true">
                 <TrendingUp className="h-3.5 w-3.5 text-white" />
               </span>
               <h2 className="text-sm font-semibold text-slate-900">Recent orders</h2>

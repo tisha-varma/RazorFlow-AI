@@ -44,9 +44,17 @@ def _wire_state_recorder():
     # tests already wired their isolated engine.
     from backend.services import session_state_log
     from backend.services.state_machine import state_machine
-    from backend.database import SessionLocal, engine
-    from backend.services.schema_compat import ensure_sqlite_schema
+    from backend.database import Base, SessionLocal, engine
+    from backend.services.schema_compat import ensure_sqlite_schema, purge_orphans
+    # Additive only (checkfirst): creates tables missing from older DB files
+    # (e.g. session_state_events, which once 500'd the funnel) without
+    # touching existing ones. Models must be imported first — routers above
+    # already pull them in.
+    Base.metadata.create_all(bind=engine, checkfirst=True)
     ensure_sqlite_schema(engine)
+    purged = purge_orphans(engine)
+    if any(purged.values()):
+        print(f"[STARTUP] purged orphans: {purged}")
     session_state_log.configure(SessionLocal)
     state_machine.on_transition(session_state_log.record_transition)
 

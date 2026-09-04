@@ -10,7 +10,17 @@ import { fetchJson } from "@/lib/api";
 
 export default function Home() {
   const [policyStatus, setPolicyStatus] = useState<"loading" | "setup_required" | "configured">("loading");
-  const [policyDetails, setPolicyDetails] = useState<any>(null);
+  const [policyDetails, setPolicyDetails] = useState<{
+    max_transaction_amount_paise: number;
+    spending_limit_paise: number;
+    require_approval: boolean;
+  } | null>(null);
+  const [stats, setStats] = useState<{
+    order_count: number;
+    total_revenue_paise: number;
+    aov_uplift_pct: number;
+    upsell_revenue_paise: number;
+  } | null>(null);
 
   useEffect(() => {
     fetchJson("/policy")
@@ -22,6 +32,12 @@ export default function Home() {
         // API offline or no active policy yet
         setPolicyStatus("setup_required");
       });
+    // Live merchant proof for the first screen — silent when unreachable.
+    fetchJson("/dashboard/summary?merchant_id=1")
+      .then((data) => {
+        if (data?.all_time) setStats(data.all_time);
+      })
+      .catch(() => {});
   }, []);
 
   return (
@@ -67,7 +83,7 @@ export default function Home() {
         <div className="text-center max-w-3xl mb-12">
           <h1 className="text-4xl md:text-6xl font-extrabold tracking-tight text-slate-900 mb-6 leading-tight">
             Safe, Explainable & Bounded <br />
-            <span className="text-indigo-600">
+            <span className="text-blue-700">
               Agentic Commerce
             </span>
           </h1>
@@ -75,8 +91,40 @@ export default function Home() {
             Welcome to RazorFlow AI, an intelligent buyer agent that interfaces with merchant catalogs
             and executes transactions securely via Razorpay Test Mode under a strict, user-approved Policy Engine.
           </p>
+          <p className="mt-3 text-[15px] font-semibold text-slate-700">
+            AI chat increases average order value through explainable upsells —
+            every rupee gated by policy, approved by a human, paid on Razorpay test mode.
+          </p>
+          {stats && stats.order_count > 0 && (
+            <div className="mx-auto mt-6 flex max-w-xl items-stretch justify-center gap-3" aria-live="polite">
+              {[
+                {
+                  value: `${stats.order_count}`,
+                  label: "paid orders",
+                },
+                {
+                  value: `₹${(stats.total_revenue_paise / 100).toLocaleString("en-IN")}`,
+                  label: "merchant revenue",
+                },
+                {
+                  value: `+${stats.aov_uplift_pct}%`,
+                  label: "AOV lift from upsells",
+                },
+              ].map((s) => (
+                <div
+                  key={s.label}
+                  className="flex-1 rounded-2xl border border-slate-200/80 bg-white px-3 py-3 shadow-[0_8px_24px_-12px_rgba(15,23,42,0.25)]"
+                >
+                  <p className="text-xl font-extrabold tabular-nums text-slate-900">
+                    {s.value}
+                  </p>
+                  <p className="mt-0.5 text-[11px] font-medium text-slate-500">{s.label}</p>
+                </div>
+              ))}
+            </div>
+          )}
           <Link href="/buyer" className="mt-8 inline-flex">
-            <Button className="h-12 px-8 text-base bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm touch-manipulation">
+            <Button className="h-12 px-8 text-base bg-blue-700 hover:bg-blue-600 text-white shadow-sm touch-manipulation">
               Start buying with AI
               <ArrowRight className="ml-2 h-5 w-5" />
             </Button>
@@ -88,7 +136,7 @@ export default function Home() {
 
           {/* Card 1: AI Buyer */}
           <Card className="bg-white border-slate-200 shadow-md hover:shadow-lg transition-all duration-300 flex flex-col group relative overflow-hidden">
-            <div className="absolute top-0 left-0 w-full h-[3px] bg-indigo-500" />
+            <div className="absolute top-0 left-0 w-full h-[3px] bg-blue-600" />
             <CardHeader>
               <div className="h-12 w-12 rounded-xl bg-indigo-100 flex items-center justify-center text-indigo-700 mb-2">
                 <ShoppingBag className="h-6 w-6" />
@@ -99,11 +147,11 @@ export default function Home() {
               </CardDescription>
             </CardHeader>
             <CardContent className="flex-1 text-sm text-slate-500">
-              <p>Experience safe agentic checkout with Razorpay. Try searching: <i>"I need daily trainers under ₹5,000"</i>.</p>
+              <p>Experience safe agentic checkout with Razorpay. Try searching: <i>&ldquo;I need daily trainers under ₹5,000&rdquo;</i>.</p>
             </CardContent>
             <CardFooter className="pt-2">
               <Link href="/buyer" className="w-full">
-                <Button className="w-full bg-indigo-600 hover:bg-indigo-500 text-white group/btn">
+                <Button className="w-full bg-blue-700 hover:bg-blue-600 text-white group/btn">
                   Launch AI Buyer
                   <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover/btn:translate-x-1" />
                 </Button>
@@ -182,6 +230,8 @@ export default function Home() {
             <Link href="/buyer" className="hover:text-slate-900 transition-colors">AI Chat</Link>
             <span className="text-slate-300">|</span>
             <Link href="/merchant" className="hover:text-slate-900 transition-colors">Merchant Portal</Link>
+            <span className="text-slate-300">|</span>
+            <Link href="/judge" className="hover:text-slate-900 transition-colors">Judge Mode</Link>
           </div>
         </div>
       </footer>

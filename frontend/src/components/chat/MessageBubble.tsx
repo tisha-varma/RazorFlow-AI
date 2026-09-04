@@ -123,14 +123,14 @@ export function MessageBubble({ message }: MessageBubbleProps) {
   return (
     <div className={`flex items-end gap-2 ${isUser ? "justify-end" : "justify-start"}`}>
       {!isUser && (
-        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 text-[11px] font-bold text-white shadow-sm" aria-hidden="true">
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-900 text-[11px] font-bold text-white" aria-hidden="true">
           AI
         </span>
       )}
       <div
         className={`max-w-[85%] rounded-2xl px-4 py-3 text-[14px] leading-relaxed ${
           isUser
-            ? "rounded-br-md bg-gradient-to-br from-indigo-600 to-violet-600 text-white shadow-[0_4px_12px_-2px_rgba(79,70,229,0.4)]"
+            ? "rounded-br-md bg-blue-700 text-white"
             : "rounded-bl-md border border-slate-200/80 bg-white text-slate-800 shadow-[0_1px_2px_rgba(15,23,42,0.06)]"
         }`}
       >

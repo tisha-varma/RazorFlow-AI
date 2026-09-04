@@ -104,8 +104,8 @@ export default function ApprovalScreen({
       }
       if (action === "approve") onApprove();
       else onReject();
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Something went wrong. Please try again.");
     } finally {
       setBusy(null);
     }
@@ -114,11 +114,11 @@ export default function ApprovalScreen({
   const details = summary?.policy_details;
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-amber-200/80 bg-gradient-to-br from-amber-50 to-orange-50/60 shadow-[0_8px_24px_-12px_rgba(217,119,6,0.35)]">
-      <div className="h-1 bg-gradient-to-r from-amber-500 to-orange-400" aria-hidden="true" />
+    <div className="overflow-hidden rounded-xl border border-amber-200/80 bg-amber-50">
+      <div className="h-1 bg-amber-500" aria-hidden="true" />
       <div className="p-5">
       <div className="mb-4 flex items-center gap-2.5">
-        <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 text-sm font-bold text-white shadow-md" aria-hidden="true">
+        <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-amber-600 text-sm font-bold text-white" aria-hidden="true">
           !
         </span>
         <div className="leading-tight">
@@ -264,7 +264,7 @@ export default function ApprovalScreen({
         <button
           onClick={() => handleAction("approve")}
           disabled={busy !== null}
-          className="h-11 flex-1 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-4 text-sm font-semibold text-white shadow-[0_6px_16px_-4px_rgba(5,150,105,0.5)] transition-all hover:from-emerald-500 hover:to-teal-500 active:scale-[0.99] disabled:opacity-50 touch-manipulation"
+          className="h-11 flex-1 rounded-xl bg-emerald-600 px-4 text-sm font-semibold text-white transition-all hover:bg-emerald-500 active:scale-[0.99] disabled:opacity-50 touch-manipulation"
         >
           {busy === "approve" ? "Approving…" : "Approve Purchase"}
         </button>

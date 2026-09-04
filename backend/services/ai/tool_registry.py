@@ -388,7 +388,10 @@ def create_tool_registry() -> ToolRegistry:
                     "primary_product_id": product_id,
                     "primary_product_name": product_name,
                     "product_names": [r["name"] for r in related],
-                    "amounts_paise": [r["base_price_paise"] for r in related]
+                    "amounts_paise": [r["base_price_paise"] for r in related],
+                    # Per-product "why" so the trail answers it on the main
+                    # demo path too (no explicit get_related_products call).
+                    "reasons": [r.get("reason") for r in related],
                 },
                 related_entity_type="cart",
                 related_entity_id=cart.id

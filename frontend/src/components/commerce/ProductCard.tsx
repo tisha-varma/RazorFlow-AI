@@ -15,7 +15,7 @@ export function ProductCard({ product, onAddToCart }: ProductCardProps) {
     `₹${(paise / 100).toLocaleString("en-IN")}`;
 
   return (
-    <div className="group flex flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.05)] transition-all duration-300 hover:-translate-y-1 hover:border-indigo-200 hover:shadow-[0_12px_32px_-8px_rgba(79,70,229,0.25)]">
+    <div className="group flex flex-col overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-blue-300 hover:shadow-lg">
       <div className="relative overflow-hidden">
         <div className="transition-transform duration-500 group-hover:scale-[1.04]">
           <ProductImage
@@ -24,7 +24,6 @@ export function ProductCard({ product, onAddToCart }: ProductCardProps) {
             className="aspect-[4/3] w-full"
           />
         </div>
-        <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-slate-950/10 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
         {product.category && (
           <span className="absolute left-2 top-2 rounded-full border border-white/40 bg-slate-950/55 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white backdrop-blur-sm">
             {product.category}
@@ -50,7 +49,7 @@ export function ProductCard({ product, onAddToCart }: ProductCardProps) {
               size="sm"
               onClick={() => onAddToCart(product)}
               aria-label={`Add ${product.name} to cart`}
-              className="h-8 w-full bg-gradient-to-r from-indigo-600 to-violet-600 text-[13px] text-white shadow-sm transition-all hover:from-indigo-500 hover:to-violet-500 hover:shadow-md active:scale-[0.98] touch-manipulation"
+              className="h-8 w-full bg-blue-700 text-[13px] text-white transition-colors hover:bg-blue-600 active:scale-[0.98] touch-manipulation"
             >
               <ShoppingCart className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
               Add

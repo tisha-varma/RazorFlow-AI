@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import { Package } from "lucide-react";
 
 interface ProductImageProps {
@@ -24,13 +25,17 @@ export function ProductImage({ src, alt, className = "" }: ProductImageProps) {
           <Package className="h-1/4 w-1/4 max-h-8 max-w-8 text-slate-300" />
         </div>
       )}
+      {/* unoptimized: catalog art mixes bundled /products files and remote
+          DB URLs, which the default optimizer would reject without
+          remotePatterns per host. */}
       {src && !failed && (
-        <img
+        <Image
           src={src}
           alt={alt}
           width={400}
           height={300}
           loading="lazy"
+          unoptimized
           onLoad={() => setLoaded(true)}
           onError={() => setFailed(true)}
           className={`h-full w-full object-cover transition-opacity duration-300 ${

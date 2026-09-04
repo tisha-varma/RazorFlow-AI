@@ -59,7 +59,12 @@ export function PolicyPanel({ sessionId, onChanged }: PolicyPanelProps) {
   };
 
   useEffect(() => {
-    load();
+    // Deferred so the effect body itself never synchronously reaches
+    // setState; the stale disable comment goes away with it.
+    const immediate = setTimeout(() => {
+      void load();
+    }, 0);
+    return () => clearTimeout(immediate);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
 
@@ -184,7 +189,7 @@ export function PolicyPanel({ sessionId, onChanged }: PolicyPanelProps) {
           size="sm"
           onClick={save}
           disabled={saving}
-          className="bg-indigo-600 hover:bg-indigo-500 text-white h-8 text-xs touch-manipulation"
+          className="bg-blue-700 hover:bg-blue-600 text-white h-8 text-xs touch-manipulation"
         >
           {saving && <Loader2 className="mr-1.5 h-3 w-3 animate-spin" aria-hidden="true" />}
           Save policy

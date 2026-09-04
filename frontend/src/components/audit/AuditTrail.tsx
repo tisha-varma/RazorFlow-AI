@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   FlaskConical,
+  Link2,
   ScrollText,
   RefreshCw,
   MessageSquare,
@@ -37,10 +38,19 @@ interface AuditEvent {
   event_data: Record<string, unknown>;
   llm_reason_text?: string | null;
   policy_snapshot_id?: string | null;
+  prev_hash?: string | null;
+  event_hash?: string | null;
   actor: string;
   timestamp?: string | null;
   related_entity_type?: string | null;
   related_entity_id?: number | null;
+}
+
+interface ChainStatus {
+  ok: boolean;
+  checked: number;
+  legacy_rows: number;
+  break_at_id?: number | null;
 }
 
 interface AuditTrailProps {
@@ -164,7 +174,11 @@ function detailFor(event: AuditEvent): string | null {
         ? (d.amounts_paise as unknown[]).filter((v): v is number => typeof v === "number")
         : [];
       const suffix = amounts.length > 0 ? ` — ${amounts.map((a) => paise(a)).join(", ")}` : "";
-      return `${list ?? "items"}${suffix}`;
+      const reasons = Array.isArray(d.reasons)
+        ? (d.reasons as unknown[]).filter((v): v is string => typeof v === "string" && v.length > 0)
+        : [];
+      const why = reasons.length > 0 ? ` — why: ${reasons.join("; ")}` : "";
+      return `${list ?? "items"}${suffix}${why}`;
     }
     case "UPSELL_ACCEPTED": {
       const name = str(d.product_name);
@@ -182,18 +196,13 @@ function detailFor(event: AuditEvent): string | null {
     }
     case "POLICY_CHECK_PASSED":
     case "POLICY_CHECK_FAILED": {
+      // Verdict only — the rationale lives in the Why column now.
       const total = paise(d.cart_total_paise);
       const limit = paise(d.max_transaction_paise);
       if (total && limit) {
-        const verdict = `₹${(Number(d.cart_total_paise) / 100).toLocaleString("en-IN")} ≤ ₹${(Number(d.max_transaction_paise) / 100).toLocaleString("en-IN")}`;
-        const snapshot = event.policy_snapshot_id ? ` · ${event.policy_snapshot_id}` : "";
-        return event.event_type === "POLICY_CHECK_FAILED" && str(d.reason)
-          ? `${verdict} — ${str(d.reason)}${snapshot}`
-          : `${verdict}${snapshot}`;
+        return `₹${(Number(d.cart_total_paise) / 100).toLocaleString("en-IN")} ≤ ₹${(Number(d.max_transaction_paise) / 100).toLocaleString("en-IN")}`;
       }
-      const snapshot = event.policy_snapshot_id ? ` · ${event.policy_snapshot_id}` : "";
-      const fallback = str(d.reason) ?? (event.event_type === "POLICY_CHECK_PASSED" ? "within limits" : null);
-      return fallback ? `${fallback}${snapshot}` : null;
+      return event.event_type === "POLICY_CHECK_PASSED" ? "within limits" : null;
     }
     case "POLICY_CHANGED": {
       const action = str(d.action);
@@ -230,6 +239,31 @@ function detailFor(event: AuditEvent): string | null {
   }
 }
 
+/** Why column: the causality behind the event, first hit wins. */
+function whyFor(event: AuditEvent): string | null {
+  const d = event.event_data || {};
+  return (
+    str(d.policy_reason) ??
+    str(d.reason) ??
+    str(d.error_description) ??
+    str(d.error_code) ??
+    str(event.llm_reason_text) ??
+    str(d.llm_reason_text) ??
+    str(d.llm_reason) ??
+    null
+  );
+}
+
+/** Amount column: the money this event is about, first hit wins. */
+function amountFor(event: AuditEvent): string | null {
+  const d = event.event_data || {};
+  for (const key of ["amount_paise", "total_paise", "cart_total_paise"]) {
+    const v = paise(d[key]);
+    if (v) return v;
+  }
+  return null;
+}
+
 function labelFor(eventType: string): string {
   return (
     LABELS[eventType] ??
@@ -248,6 +282,16 @@ export function AuditTrail({ sessionId, merchantId, refreshKey }: AuditTrailProp
   const [events, setEvents] = useState<AuditEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [chain, setChain] = useState<ChainStatus | null>(null);
+
+  const fetchChain = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/audit/verify`);
+      if (res.ok) setChain(await res.json());
+    } catch {
+      /* chain badge is advisory */
+    }
+  }, []);
 
   const fetchTrail = useCallback(async () => {
     void refreshKey;
@@ -276,13 +320,18 @@ export function AuditTrail({ sessionId, merchantId, refreshKey }: AuditTrailProp
   }, [sessionId, merchantId, refreshKey]);
 
   useEffect(() => {
-    const immediate = setTimeout(fetchTrail, 0);
-    const timer = setInterval(fetchTrail, 4000);
+    const immediate = setTimeout(() => {
+      void fetchTrail();
+      void fetchChain();
+    }, 0);
+    const timer = setInterval(() => {
+      void fetchTrail();
+    }, 4000);
     return () => {
       clearTimeout(immediate);
       clearInterval(timer);
     };
-  }, [fetchTrail]);
+  }, [fetchTrail, fetchChain]);
 
   return (
     <div className="flex h-full flex-col">
@@ -295,10 +344,31 @@ export function AuditTrail({ sessionId, merchantId, refreshKey }: AuditTrailProp
         <Badge variant="outline" className="border-slate-300 text-[11px] tabular-nums text-slate-600 bg-slate-50">
           {events.length}
         </Badge>
+        {chain && (
+          <Badge
+            variant="outline"
+            className={`gap-1 rounded-full text-[11px] ${
+              chain.ok
+                ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                : "border-red-300 bg-red-50 text-red-700"
+            }`}
+            title={
+              chain.ok
+                ? `Hash chain verified over ${chain.checked} events (${chain.legacy_rows} pre-chain legacy rows skipped)`
+                : `Chain broken at event #${chain.break_at_id}`
+            }
+          >
+            <Link2 className="h-3 w-3" aria-hidden="true" />
+            {chain.ok ? `Chain intact · ${chain.checked}` : `Chain broken @${chain.break_at_id}`}
+          </Badge>
+        )}
         <Button
           variant="ghost"
           size="icon"
-          onClick={fetchTrail}
+          onClick={() => {
+            void fetchTrail();
+            void fetchChain();
+          }}
           aria-label="Refresh audit trail"
           title="Refresh trail"
           className="ml-auto h-7 w-7 text-slate-400 hover:text-slate-900 hover:bg-slate-100"
@@ -329,12 +399,18 @@ export function AuditTrail({ sessionId, merchantId, refreshKey }: AuditTrailProp
                 <th scope="col" className="w-10 px-3 py-2 text-center">✓</th>
                 <th scope="col" className="px-3 py-2 whitespace-nowrap">Time</th>
                 <th scope="col" className="px-3 py-2">Event</th>
-                <th scope="col" className="px-3 py-2">Details</th>
+                <th scope="col" className="px-3 py-2">What happened</th>
+                <th scope="col" className="px-3 py-2">Why</th>
+                <th scope="col" className="px-3 py-2 text-right">Amount</th>
+                <th scope="col" className="px-3 py-2">Actor</th>
+                <th scope="col" className="px-3 py-2">Policy · hash</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {events.map((event) => {
                 const detail = detailFor(event);
+                const why = whyFor(event);
+                const amount = amountFor(event);
                 const Icon = EVENT_ICONS[event.event_type] ?? CircleDot;
                 const chip = EVENT_CHIP[event.event_type] ?? "bg-slate-200 text-slate-600";
                 const failed = FAILED_TYPES.has(event.event_type);
@@ -355,14 +431,36 @@ export function AuditTrail({ sessionId, merchantId, refreshKey }: AuditTrailProp
                         <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md ${chip}`}>
                           <Icon className="h-3.5 w-3.5" aria-hidden="true" />
                         </span>
-                        <span className="text-[13px] font-semibold text-slate-900">
+                        <span className="whitespace-nowrap text-[13px] font-semibold text-slate-900">
                           {labelFor(event.event_type)}
                         </span>
                       </span>
-                      <span className="mt-1 block text-[11px] text-slate-400">{event.actor}</span>
                     </td>
                     <td className="px-3 py-2.5 text-[13px] leading-relaxed text-slate-600 break-words">
                       {detail ?? <span className="text-slate-300">—</span>}
+                    </td>
+                    <td className="px-3 py-2.5 text-[13px] italic leading-relaxed text-indigo-700 break-words">
+                      {why ?? <span className="text-slate-300 not-italic">—</span>}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2.5 text-right text-[13px] font-semibold tabular-nums text-slate-900">
+                      {amount ?? <span className="font-normal text-slate-300">—</span>}
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">
+                        {event.actor}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2.5 font-mono text-[11px] text-slate-500 break-all">
+                      <span title={event.policy_snapshot_id ?? undefined}>
+                        {event.policy_snapshot_id
+                          ? `${event.policy_snapshot_id.slice(0, 12)}…`
+                          : <span className="text-slate-300">—</span>}
+                      </span>
+                      {event.event_hash && (
+                        <span className="mt-0.5 block text-slate-400" title={`prev_hash ${event.prev_hash ?? "—"}\nevent_hash ${event.event_hash}`}>
+                          #{event.event_hash.slice(0, 8)}
+                        </span>
+                      )}
                     </td>
                   </tr>
                 );

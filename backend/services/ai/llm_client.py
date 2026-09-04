@@ -261,7 +261,10 @@ class RotatingGroqClient(LLMClient):
                 err_str = str(e).lower()
                 if "rate" in err_str or "limit" in err_str or "quota" in err_str or "429" in err_str:
                     print(f"[LLM] Key {idx} rate limited, rotating to next...")
-                    last_error = TextResponse(text="Rate limited. Rotating to next API key...")
+                    last_error = TextResponse(text=(
+                        "The AI service is temporarily rate limited. "
+                        "Please wait a moment and try again."
+                    ))
                     continue
                 last_error = TextResponse(text=f"LLM error: {str(e)[:100]}")
                 print(f"[LLM] Key {idx} error: {e}")

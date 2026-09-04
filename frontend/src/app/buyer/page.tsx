@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
-import { ChatPanel } from "@/components/chat/ChatPanel";
+import { ChatPanel, type TurnTrace } from "@/components/chat/ChatPanel";
+import { TracePanel, type FullTrace } from "@/components/chat/TracePanel";
 import { CommercePanel } from "@/components/commerce/CommercePanel";
 import { PolicyPanel } from "@/components/commerce/PolicyPanel";
 import { AuditTrail } from "@/components/audit/AuditTrail";
@@ -11,10 +12,15 @@ import { Product, Cart } from "@/lib/types";
 import { fetchJson } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, ShieldCheck, Activity, Settings2, RotateCcw } from "lucide-react";
+import { ArrowLeft, ShieldCheck, Activity, Settings2, RotateCcw, XCircle, ListTree } from "lucide-react";
 
 export default function BuyerPage() {
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  // Lazy init from storage: reading localStorage during render (not in an
+  // effect) keeps the mount effect free of synchronous setState.
+  const [sessionId, setSessionId] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    return localStorage.getItem("razorflow_session_id");
+  });
   const [products, setProducts] = useState<Product[]>([]);
   const [upsellProducts, setUpsellProducts] = useState<Product[]>([]);
   const [cart, setCart] = useState<Cart | null>(null);
@@ -23,9 +29,15 @@ export default function BuyerPage() {
   const [approvalToken, setApprovalToken] = useState<string | null>(null);
   const [approvedId, setApprovedId] = useState<number | null>(null);
   const [showAudit, setShowAudit] = useState(false);
+  const [showTrace, setShowTrace] = useState(false);
+  const [trace, setTrace] = useState<FullTrace | null>(null);
   const [showPolicy, setShowPolicy] = useState(false);
   const [policyVersion, setPolicyVersion] = useState(0);
-  const [recovery, setRecovery] = useState<null | { kind: "failed" | "stale" }>(null);
+  const [recovery, setRecovery] = useState<
+    null | { kind: "stale" } | { kind: "failed"; orderNumber?: string; reason?: string }
+  >(null);
+  const [demoEnabled, setDemoEnabled] = useState(false);
+  const [simulating, setSimulating] = useState(false);
   const chatRef = useRef<{ sendMessage: (msg: string) => void } | null>(null);
   const cartRef = useRef<Cart | null>(null);
 
@@ -33,6 +45,10 @@ export default function BuyerPage() {
   useEffect(() => {
     cartRef.current = cart;
   }, [cart]);
+
+  // Extracted primitive for effect deps (declared before the effects that
+  // use it — no use-before-declare, no complex dep expressions).
+  const cartItemCount = (cart?.items ?? []).length;
 
   const fetchCart = useCallback(async (cartId: number) => {
     try {
@@ -46,13 +62,11 @@ export default function BuyerPage() {
   }, []);
 
   useEffect(() => {
-    const savedSession = localStorage.getItem("razorflow_session_id");
-    if (savedSession) {
-      setSessionId(savedSession);
+    if (sessionId) {
       // Restore cart for persisted session, then check whether the
       // session needs recovery (failed payment or pre-reload approval
       // whose single-use token is gone with the old page).
-      fetchJson(`/agent/session/${savedSession}`)
+      fetchJson(`/agent/session/${sessionId}`)
         .then(async (data) => {
           if (data.cart_id) {
             await fetchCart(data.cart_id);
@@ -62,7 +76,7 @@ export default function BuyerPage() {
             }
             try {
               const summary = await fetchJson(
-                `/checkout/summary/${data.cart_id}?session_id=${encodeURIComponent(savedSession)}`
+                `/checkout/summary/${data.cart_id}?session_id=${encodeURIComponent(sessionId)}`
               );
               if (summary.status === "pending" && summary.approval_id) {
                 setRecovery({ kind: "stale" });
@@ -89,7 +103,12 @@ export default function BuyerPage() {
     fetchJson("/policy")
       .then(() => setPolicyActive(true))
       .catch(() => setPolicyActive(false));
-  }, [fetchCart]);
+    // Demo-only failure simulator lives behind the same flag as the
+    // /api/demo routes — invisible in anything resembling production.
+    fetchJson("/demo/status")
+      .then((d) => setDemoEnabled(d?.demo_mode === true))
+      .catch(() => setDemoEnabled(false));
+  }, [fetchCart, sessionId]);
 
   // UI cart actions hit the API directly and NEVER go through the agent:
   // no LLM calls, no conversational waiting. The panel updates from the
@@ -166,6 +185,11 @@ export default function BuyerPage() {
   const handleApprovalNeeded = useCallback((id: number, token?: string | null) => {
     setApprovalId(id);
     setApprovalToken(token ?? null);
+    setTrace((t) => (t ? { ...t, approvalId: id } : t));
+  }, []);
+
+  const handleTraceFound = useCallback((t: TurnTrace) => {
+    setTrace({ ...t, paidOrderNumber: null });
   }, []);
 
   const handleApprovalComplete = useCallback(() => {
@@ -189,26 +213,105 @@ export default function BuyerPage() {
     }
   }, []);
 
-  // Fresh budget, fresh thread: spending limits are per-session, so a new
-  // session restores the full ₹10,000. Old session rows are cleaned up
-  // best-effort (demo endpoint); the reload mints the new session.
+  // Approval gate polling: the Approval is minted deterministically the
+  // moment the LLM calls initiate_checkout — potentially ~35s before its
+  // turn finishes streaming back. Poll the summary while a non-empty cart
+  // has no gate showing, and render approval the instant it exists instead
+  // of waiting on LLM latency. Token-gated: a pending approval WITHOUT a
+  // live token surfaces the stale-recovery banner, never the gate.
+  useEffect(() => {
+    if (!sessionId || !cart?.id || cartItemCount === 0) return;
+    if (approvalId !== null || approvedId !== null) return;
+    let cancelled = false;
+    const check = async () => {
+      try {
+        const s = await fetchJson(
+          `/checkout/summary/${cart.id}?session_id=${encodeURIComponent(sessionId)}`
+        );
+        if (cancelled) return;
+        if (s.status === "pending" && s.approval_id) {
+          if (s.approval_token) {
+            handleApprovalNeeded(s.approval_id, s.approval_token);
+          } else {
+            setRecovery((r) => r ?? { kind: "stale" });
+          }
+        }
+      } catch {
+        /* summary is advisory — chat path still delivers the gate */
+      }
+    };
+    check();
+    const timer = setInterval(check, 2500);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [sessionId, cart?.id, cartItemCount, approvalId, approvedId, handleApprovalNeeded]);
+
+  // Deterministic judge-state reset: clears this session's carts, orders,
+  // approvals, and trail rows, restores policy defaults (server-side), and
+  // reseeds merchant demo history — then mints a fresh session so budget,
+  // cart, and gate all start perfect. Each step is best-effort; the reload
+  // is what guarantees a clean client.
+  const [resetting, setResetting] = useState(false);
   const handleNewSession = useCallback(async () => {
+    setResetting(true);
     if (sessionId) {
       try {
         await fetchJson(`/demo/reset?session_id=${encodeURIComponent(sessionId)}`, {
           method: "POST",
         });
       } catch {
-        /* cleanup is a bonus — the new session is what resets budget */
+        /* session cleanup is a bonus — the reload still gives a clean client */
+      }
+      try {
+        await fetchJson("/demo/seed-history?count=24", { method: "POST" });
+      } catch {
+        /* history reseed is a bonus — merchant self-seeds when empty */
       }
     }
     localStorage.removeItem("razorflow_session_id");
     window.location.reload();
   }, [sessionId]);
 
+  // In-browser failure path: runs a gateway decline against THIS session
+  // (no terminal needed), then surfaces the failed-payment card below.
+  // Retry is the existing recovery banner's "Checkout again" — fresh
+  // approval, same cart, real Razorpay order.
+  const handleSimulateDecline = useCallback(async () => {
+    if (!sessionId || simulating) return;
+    setSimulating(true);
+    try {
+      const result = await fetchJson(
+        `/demo/run-payment-failure?session_id=${encodeURIComponent(sessionId)}`,
+        { method: "POST" }
+      );
+      try {
+        const sess = await fetchJson(
+          `/agent/session/${encodeURIComponent(sessionId)}`
+        );
+        if (sess?.cart_id) await fetchCart(sess.cart_id);
+      } catch {
+        /* cart refresh is a bonus — the card shows regardless */
+      }
+      setApprovalId(null);
+      setApprovedId(null);
+      setRecovery({
+        kind: "failed",
+        orderNumber: typeof result?.order_number === "string" ? result.order_number : undefined,
+        reason: typeof result?.reason === "string" ? result.reason : undefined,
+      });
+    } catch (e) {
+      setRecovery({ kind: "failed", reason: e instanceof Error ? e.message : undefined });
+    } finally {
+      setSimulating(false);
+    }
+  }, [sessionId, simulating, fetchCart]);
+
   const handlePaid = useCallback((order: { order_id: number; order_number: string; total_paise: number }) => {
     setApprovedId(null);
     setCart(null);
+    setTrace((t) => (t ? { ...t, paidOrderNumber: order.order_number } : t));
     if (chatRef.current) {
       chatRef.current.sendMessage(
         `Payment successful for order ${order.order_number}. What's next?`
@@ -232,11 +335,6 @@ export default function BuyerPage() {
 
   return (
     <div className="relative h-screen text-slate-900 flex flex-col bg-stone-100">
-      {/* Ambient mesh backdrop */}
-      <div className="pointer-events-none absolute inset-0" aria-hidden="true">
-        <div className="absolute -top-32 left-1/4 h-72 w-72 rounded-full bg-indigo-300/20 blur-[100px]" />
-        <div className="absolute bottom-0 right-1/4 h-72 w-72 rounded-full bg-violet-300/20 blur-[100px]" />
-      </div>
       <header className="relative border-b border-slate-200/80 bg-white/85 backdrop-blur-md px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-2 z-50 shadow-[0_1px_12px_rgba(15,23,42,0.06)]">
         <Link href="/">
           <Button variant="ghost" size="sm" className="rounded-full text-slate-500 hover:text-slate-900 hover:bg-slate-100">
@@ -246,7 +344,7 @@ export default function BuyerPage() {
         </Link>
 
         <div className="flex items-center gap-2">
-          <div className="h-8 w-8 rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 flex items-center justify-center text-xs font-bold text-white shadow-[0_4px_12px_-2px_rgba(79,70,229,0.5)]">
+          <div className="h-8 w-8 rounded-lg bg-slate-900 flex items-center justify-center text-xs font-bold text-white">
             R
           </div>
           <div className="leading-tight">
@@ -288,7 +386,32 @@ export default function BuyerPage() {
           Policy settings
         </Button>
 
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setShowTrace((v) => !v)}
+          aria-expanded={showTrace}
+          title="Protocol trace of the last turn: intent, tools, policy, approval, payment"
+          className={showTrace ? "text-indigo-700 bg-indigo-50" : "text-slate-500 hover:text-slate-900"}
+        >
+          <ListTree className="h-4 w-4 mr-1" aria-hidden="true" />
+          Trace
+        </Button>
+
         <div className="ml-auto flex items-center gap-3">
+          {demoEnabled && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleSimulateDecline}
+              disabled={simulating}
+              title="Run a gateway decline on this session — shows the failed-payment card and retry path"
+              className="rounded-full border border-red-200 bg-white text-[12px] text-red-700 hover:bg-red-50 hover:text-red-800"
+            >
+              <XCircle className={`h-3.5 w-3.5 mr-1 ${simulating ? "animate-spin" : ""}`} aria-hidden="true" />
+              {simulating ? "Declining…" : "Simulate decline"}
+            </Button>
+          )}
           <SessionLimitBar
             sessionId={sessionId}
             refreshKey={`${cart?.id ?? 0}-${approvalId ?? 0}-${approvedId ?? 0}-${policyVersion}`}
@@ -300,11 +423,12 @@ export default function BuyerPage() {
             variant="ghost"
             size="sm"
             onClick={handleNewSession}
-            title="Start a fresh session — restores the full spending limit"
-            className="rounded-full text-slate-500 hover:text-slate-900 hover:bg-slate-100"
+            disabled={resetting}
+            title="Reset to perfect judge state: clears this session, restores policy defaults, reseeds demo history, starts fresh"
+            className="rounded-full border border-amber-300 bg-amber-50 text-amber-800 hover:text-amber-900 hover:bg-amber-100"
           >
-            <RotateCcw className="h-3.5 w-3.5 mr-1" aria-hidden="true" />
-            Reset
+            <RotateCcw className={`h-3.5 w-3.5 mr-1 ${resetting ? "animate-spin" : ""}`} aria-hidden="true" />
+            {resetting ? "Resetting…" : "Reset demo"}
           </Button>
         </div>
       </header>
@@ -318,19 +442,31 @@ export default function BuyerPage() {
           }`}
           aria-live="polite"
         >
+          {recovery.kind === "failed" && (
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-red-600 shadow-md" aria-hidden="true">
+              <XCircle className="h-5 w-5 text-white" />
+            </span>
+          )}
           <div className="min-w-0 flex-1">
             <p className={`text-sm font-semibold ${
               recovery.kind === "failed" ? "text-red-800" : "text-amber-900"
             }`}>
               {recovery.kind === "failed"
-                ? "Payment didn't go through — no charge was made."
+                ? "Payment failed — no charge was made."
                 : "Unfinished approval from before this reload."}
+              {recovery.kind === "failed" && recovery.orderNumber && (
+                <span className="ml-2 rounded-md bg-white/80 px-1.5 py-0.5 font-mono text-xs font-bold text-red-800">
+                  {recovery.orderNumber}
+                </span>
+              )}
             </p>
             <p className={`text-[13px] ${
               recovery.kind === "failed" ? "text-red-700" : "text-amber-800"
             }`}>
               {recovery.kind === "failed"
-                ? "Your cart is intact. Checkout again for a fresh approval, then pay."
+                ? recovery.reason
+                  ? `Gateway said: ${recovery.reason}. Your cart is intact — retry below for a fresh approval.`
+                  : "Your cart is intact. Checkout again for a fresh approval, then pay."
                 : "Its single-use token expired with the old page. Checkout again for a fresh approval."}
             </p>
           </div>
@@ -344,7 +480,7 @@ export default function BuyerPage() {
             }}
             className="bg-emerald-600 hover:bg-emerald-500 text-white touch-manipulation"
           >
-            Checkout again
+            {recovery.kind === "failed" ? "Retry payment" : "Checkout again"}
           </Button>
           <Button
             variant="ghost"
@@ -365,6 +501,10 @@ export default function BuyerPage() {
         />
       )}
 
+      {showTrace && trace && (
+        <TracePanel trace={trace} sessionId={sessionId} />
+      )}
+
       {showAudit && (
         <div className="h-72 shrink-0 overflow-hidden border-b border-slate-200 bg-white px-4 py-3 shadow-sm">
           <AuditTrail
@@ -383,6 +523,7 @@ export default function BuyerPage() {
             onUpsellFound={setUpsellProducts}
             onCartUpdate={setCart}
             onApprovalNeeded={handleApprovalNeeded}
+            onTraceFound={handleTraceFound}
           />
         </div>
         <div className="min-h-0 flex-1 md:w-1/2 w-full rounded-2xl overflow-hidden border border-slate-200/80 shadow-[0_8px_24px_-12px_rgba(15,23,42,0.2)]">

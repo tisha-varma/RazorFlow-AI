@@ -52,3 +52,8 @@ class PurchaseSummary(BaseModel):
     policy_allowed: Optional[bool] = None
     policy_reason: Optional[str] = None
     policy_details: Optional[dict] = None
+    # Single-use token for the pending approval, when one exists. Lets the
+    # buyer UI render the approval gate the moment the backend mints it
+    # (polling) instead of waiting ~35s for the LLM turn to finish. Scoped
+    # to the session holder — the same party the chat path gives it to.
+    approval_token: Optional[str] = None

@@ -69,10 +69,12 @@ class CartService:
 
     @staticmethod
     def get_active_cart_by_session(db: Session, session_id: str) -> Optional[Cart]:
+        # Newest first: a session should never hold two active carts, but if
+        # it does (interrupted flows), the live one wins over a stale row.
         return db.query(Cart).filter(
             Cart.session_id == session_id,
             Cart.status == "active"
-        ).first()
+        ).order_by(Cart.id.desc()).first()
 
     @staticmethod
     def add_item(

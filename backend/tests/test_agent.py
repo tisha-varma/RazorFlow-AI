@@ -223,6 +223,42 @@ class TestSystemEchoes:
         assert result["response"] == "Hello shopper"
 
 
+class TestProviderResilience:
+    @pytest.mark.asyncio
+    async def test_transient_rate_limit_retried(self, db_session, seed_data):
+        from backend.services.ai.agent import Agent
+        from backend.services.ai.llm_client import TextResponse
+
+        agent = Agent(_FakeLLMClient([
+            TextResponse(text="Rate limited. Rotating to next API key..."),
+            TextResponse(text="Back in business."),
+        ]))
+        result = await agent.handle_message(db_session, "res-sess-1", "show me shoes")
+
+        assert agent.llm_client.calls == 2
+        assert result["response"] == "Back in business."
+
+    @pytest.mark.asyncio
+    async def test_total_outage_honest_fallback(self, db_session, seed_data):
+        from backend.services.ai.agent import Agent
+        from backend.services.ai.llm_client import TextResponse
+
+        agent = Agent(_FakeLLMClient([
+            TextResponse(text="All AI providers are unavailable. Please try again later.")
+        ]))
+        result = await agent.handle_message(db_session, "res-sess-2", "show me shoes")
+
+        assert "Rate limited" not in result["response"]
+        assert "unavailable" not in result["response"].lower()
+        assert "SprintGear" in result["response"]
+
+    def test_failure_markers(self):
+        from backend.services.ai.agent import Agent
+        assert Agent._is_provider_failure("Rate limited. Rotating to next API key...")
+        assert Agent._is_provider_failure("LLM error: 429 quota")
+        assert not Agent._is_provider_failure("Here are great running shoes for you")
+
+
 class TestInitiateCheckoutTool:
     @pytest.mark.asyncio
     async def test_tool_creates_approval_with_token(self, db_session, seed_data):
