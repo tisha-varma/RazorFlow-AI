@@ -1,7 +1,6 @@
 # RazorFlow AI
 
 [![Tests: 174 passing](https://img.shields.io/badge/tests-174%20passing-brightgreen)](backend/tests)
-[![Lint: clean](https://img.shields.io/badge/eslint-0%20errors%200%20warnings-brightgreen)](frontend/src)
 [![Build: passing](https://img.shields.io/badge/next%20build-passing-brightgreen)](frontend/src)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Razorpay: test mode](https://img.shields.io/badge/Razorpay-test%20mode-blue)](https://razorpay.com/docs/payments/test-mode/)
